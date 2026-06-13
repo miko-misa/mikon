@@ -96,6 +96,10 @@ def create_api_router() -> APIRouter:
     def patch_run(run_id: str, body: AnnotationsPatch, request: Request):
         return request.app.state.store.patch_annotations(run_id, body)
 
+    @router.delete("/runs/{run_id}", status_code=204)
+    def delete_run(run_id: str, request: Request):
+        request.app.state.store.delete_run(run_id)
+
     @router.get("/runs/{run_id}/metrics")
     def get_metrics(
         run_id: str,

@@ -213,6 +213,19 @@ class Store:
         self.write_annotations(run_id, annotations)
         return self.get_run(run_id)
 
+    def delete_run(self, run_id: str) -> None:
+        run_dir = self.require_run_dir(run_id)
+        status_data = self._status_data(run_dir)
+        if status_data.get("status") == "running":
+            raise ProblemException(
+                type="/problems/run-is-running",
+                title="Run is still running",
+                status=409,
+                detail=f"Run {run_id} is currently running. Stop it before deleting.",
+                run_id=run_id,
+            )
+        shutil.rmtree(run_dir)
+
     def run_dir(self, run_id: str) -> Path:
         return self.runs_root / run_id
 
