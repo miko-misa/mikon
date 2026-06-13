@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mikon"
+version = "0.0.1"
+description = "Self-hosted AI job development manager"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+  "bleach>=6.1,<7",
+  "fastapi>=0.115,<1",
+  "httpx>=0.27,<1",
+  "Markdown>=3.6,<4",
+  "nvidia-ml-py>=12.550,<13",
+  "psutil>=5.9,<8",
+  "pydantic>=2.8,<3",
+  "sse-starlette>=2.1,<4",
+  "typer>=0.12,<1",
+  "uvicorn[standard]>=0.30,<1",
+  "watchfiles>=0.22,<2",
+]
+
+[project.scripts]
+mikon = "mikon.cli:app"
+
+[dependency-groups]
+dev = [
+  "pytest>=8,<9",
+  "pytest-asyncio>=0.23,<1",
+]
+
+[tool.hatch.build]
+artifacts = ["mikon/web/**"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/mikon",
+  "/README.md",
+  "/pyproject.toml",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["mikon"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

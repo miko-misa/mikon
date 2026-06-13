@@ -1,0 +1,16 @@
+documents
+.mikon/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+node_modules/
+frontend/dist/
+frontend/node_modules/
+mikon/web/index.html
+mikon/web/assets/
