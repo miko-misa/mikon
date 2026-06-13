@@ -573,17 +573,19 @@ GET /api/runs/{run_id}/lineage?direction=both&depth=2&include_modules=false
 
 ---
 
-## 11. 整理機能（タグ・グループ・スター）
+## 11. 整理機能（タグ・グループ・スター・削除）
 
-各ランには後からアノテーションを付けられます。UIから編集するほか、API の `PATCH /api/runs/{run_id}` でも操作できます。
+各ランにはアノテーションを付けられます。**起動時**（UI のジョブ起動フォームまたは `CreateRunRequest.annotations`）に設定することも、**起動後**（UI の Overview タブまたは `PATCH /api/runs/{run_id}`）に編集することもできます。
 
 | フィールド | 型 | 説明 |
 | --- | --- | --- |
-| `title` | `str \| null` | 表示名（省略するとラン ID） |
-| `note` | `str \| null` | メモ |
+| `title` | `str \| null` | 表示名。省略するとラン ID が表示名として扱われる |
+| `memo` | `str \| null` | メモ・ノート |
 | `tags` | `list[str]` | 自由タグ（複数） |
-| `star` | `bool` | スター（お気に入り） |
-| `group_id` | `str \| null` | グループへの帰属 |
+| `star` | `bool` | スター（お気に入りフラグ） |
+| `group_ids` | `list[str]` | 所属グループの ID 一覧 |
+
+`title` はラン一覧・詳細ヘッダでの主表示として使われます。未設定の場合はラン ID が代わりに表示されます。
 
 **グループ** は独立した管理対象で、複数のランをまとめて比較・整理するための入れ物です。グループ単位でランを並べて比較できます。
 
@@ -592,6 +594,16 @@ GET /api/runs/{run_id}/lineage?direction=both&depth=2&include_modules=false
 ```
 GET /api/runs?tag=baseline&star=true&group=<group_id>&job=train&status=completed
 ```
+
+### ランの削除
+
+UIのラン詳細画面の削除ボタン、またはラン一覧の各行・一括削除から実行できます。必ず確認ダイアログが表示されます。実行中（`status=running`）のランは削除できません。
+
+```
+DELETE /api/runs/{run_id}    # 204 No Content
+```
+
+削除するとストア内のディレクトリ（メタ・ログ・成果物を含む）がすべて消去されます。**この操作は取り消せません。**
 
 ---
 

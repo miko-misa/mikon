@@ -575,17 +575,17 @@ GET /api/runs/{run_id}/lineage?direction=both&depth=2&include_modules=false
 
 ---
 
-## 11. Organization: Tags, Groups, and Stars
+## 11. Organization: Tags, Groups, Stars, and Deletion
 
-Annotations can be added to any run after the fact — either from the UI or via `PATCH /api/runs/{run_id}`.
+Annotations can be set at **launch time** (via the UI job launch form or `CreateRunRequest.annotations`) or edited **after the fact** (via the UI Overview tab or `PATCH /api/runs/{run_id}`).
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `title` | `str \| null` | Display name (defaults to the run ID) |
-| `note` | `str \| null` | Free-text note |
+| `title` | `str \| null` | Display name. Shown as the primary label in lists and the detail header. Defaults to run ID when unset. |
+| `memo` | `str \| null` | Free-text note |
 | `tags` | `list[str]` | Arbitrary tags (multiple allowed) |
 | `star` | `bool` | Starred / favourited |
-| `group_id` | `str \| null` | Group membership |
+| `group_ids` | `list[str]` | List of group IDs this run belongs to |
 
 **Groups** are first-class containers for collecting and comparing multiple runs side by side.
 
@@ -594,6 +594,16 @@ Filtering in `GET /api/runs`:
 ```
 GET /api/runs?tag=baseline&star=true&group=<group_id>&job=train&status=completed
 ```
+
+### Deleting Runs
+
+Runs can be deleted from the run detail page or via the bulk-delete action in the runs list. A confirmation dialog is always shown. Runs with `status=running` cannot be deleted.
+
+```
+DELETE /api/runs/{run_id}    # 204 No Content
+```
+
+Deleting a run permanently removes its entire store directory — metadata, logs, metrics, and artifacts. **This operation cannot be undone.**
 
 ---
 
