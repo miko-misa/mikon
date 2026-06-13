@@ -17,6 +17,8 @@ app = typer.Typer(no_args_is_help=True)
 dataset_app = typer.Typer(no_args_is_help=True)
 app.add_typer(dataset_app, name="dataset")
 
+_TEMPLATES_DIR = Path(__file__).parent / "templates"
+
 
 @app.command()
 def init(
@@ -25,6 +27,10 @@ def init(
     root = Path.cwd()
     _write_template(root / "mikon.toml", MIKON_TOML, force)
     _write_template(root / "src" / "example.py", EXAMPLE_JOB, force)
+    for fname in ("USAGE.md", "USAGE-en.md"):
+        src = _TEMPLATES_DIR / "docs" / fname
+        if src.exists():
+            _write_template(root / "docs" / fname, src.read_text(encoding="utf-8"), force)
     typer.echo("Initialized mikon project.")
 
 
