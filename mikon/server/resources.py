@@ -170,7 +170,29 @@ class AmdBackend(GpuBackend):
 
             return True
         except Exception:
-            return shutil.which("rocm-smi") is not None or shutil.which("amd-smi") is not None
+            pass
+        for cmd, extra in [("rocm-smi", ["--json"]), ("amd-smi", ["list", "--json"])]:
+            path = shutil.which(cmd)
+            if path:
+                try:
+                    probe = subprocess.run(
+                        [path] + extra,
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                        check=False,
+                    )
+                    # rocm-smi returns 0 even when amdgpu module is absent;
+                    # treat as unavailable if stderr mentions driver/init errors.
+                    bad = probe.returncode != 0 or any(
+                        phrase in probe.stderr.lower()
+                        for phrase in ("not initialized", "driver not", "amdgpu not found")
+                    )
+                    if not bad:
+                        return True
+                except Exception:
+                    pass
+        return False
 
     def gpus(self, pid_run_map: dict[int, str]) -> list[GpuInfo]:
         try:
@@ -265,6 +287,112 @@ class AmdBackend(GpuBackend):
                 pass
 
 
+class ClinfoBackend(GpuBackend):
+    """AMD GPU fallback for environments where the amdgpu kernel module is
+    absent (WSL2, certain container setups) but OpenCL is functional.
+    Reports static info only — utilisation and memory usage are unavailable."""
+
+    vendor: Literal["amd"] = "amd"
+    visible_env = "ROCR_VISIBLE_DEVICES"
+
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+
+    @classmethod
+    def available(cls) -> bool:
+        if shutil.which("clinfo") is None:
+            return False
+        try:
+            result = subprocess.run(
+                ["clinfo"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            return "1002h" in result.stdout
+        except Exception:
+            return False
+
+    def gpus(self, pid_run_map: dict[int, str]) -> list[GpuInfo]:
+        try:
+            result = subprocess.run(
+                ["clinfo"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            if result.returncode != 0:
+                return []
+            return self._parse(result.stdout)
+        except Exception:
+            return []
+
+    def _parse(self, text: str) -> list[GpuInfo]:
+        result: list[GpuInfo] = []
+        gpu_index = 0
+        current: dict[str, str] = {}
+        in_device = False
+
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if ":" not in line:
+                continue
+            key, _, value = line.partition(":")
+            key = key.strip()
+            value = value.strip()
+
+            if key == "Device Type":
+                if in_device:
+                    gpu = self._make_gpu(current, gpu_index)
+                    if gpu is not None:
+                        result.append(gpu)
+                        gpu_index += 1
+                current = {"device_type": value}
+                in_device = True
+            elif in_device:
+                if key == "Vendor ID":
+                    current["vendor_id"] = value
+                elif key == "Board name":
+                    current["board_name"] = value
+                elif key == "Name" and "board_name" not in current:
+                    current["name"] = value
+                elif key == "Global memory size":
+                    current["global_mem"] = value
+
+        if in_device:
+            gpu = self._make_gpu(current, gpu_index)
+            if gpu is not None:
+                result.append(gpu)
+
+        return result
+
+    def _make_gpu(self, info: dict[str, str], index: int) -> GpuInfo | None:
+        if "GPU" not in info.get("device_type", ""):
+            return None
+        if "1002" not in info.get("vendor_id", "").lower():
+            return None
+        name = info.get("board_name") or info.get("name") or f"AMD GPU {index}"
+        mem_total_mib = 0
+        mem_bytes = _float_or_none(info.get("global_mem", ""))
+        if mem_bytes:
+            mem_total_mib = int(mem_bytes / 1024 / 1024)
+        return GpuInfo(
+            id=f"amd:{index}",
+            vendor="amd",
+            index=index,
+            name=name,
+            util_pct=0.0,
+            mem_used_mib=0,
+            mem_total_mib=mem_total_mib,
+            temp_c=None,
+            power_w=None,
+            occupied=False,
+            processes=[],
+        )
+
+
 def visible_env_for_vendor(vendor: str) -> str:
     if vendor == "nvidia":
         return NvidiaBackend.visible_env
@@ -279,6 +407,8 @@ def _available_backends(settings: Settings) -> list[GpuBackend]:
         backends.append(NvidiaBackend(settings))
     if AmdBackend.available():
         backends.append(AmdBackend(settings))
+    elif ClinfoBackend.available():
+        backends.append(ClinfoBackend(settings))
     return backends
 
 
