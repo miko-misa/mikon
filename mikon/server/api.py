@@ -155,16 +155,24 @@ def create_api_router() -> APIRouter:
         asset_prefix = "assets/"
         if doc_path.startswith(asset_prefix):
             asset_path = doc_path.removeprefix(asset_prefix)
-            if Path(asset_path).suffix.lower() in ASSET_EXTENSIONS:
+            suffix = Path(asset_path).suffix.lower()
+            if suffix in ASSET_EXTENSIONS:
                 path, media_type = service.asset(asset_path)
                 return FileResponse(path, media_type=media_type)
-            if Path(asset_path).suffix.lower() in DOC_EXTENSIONS:
+            if suffix in DOC_EXTENSIONS:
                 try:
                     return service.document(doc_path)
                 except ProblemException as exc:
                     if exc.type != "/problems/doc-not-found":
                         raise
                 return service.document(asset_path)
+            raise ProblemException(
+                type="/problems/doc-unsupported",
+                title="Unsupported document type",
+                status=415,
+                detail=f"Unsupported file extension: {suffix or '(none)'}",
+                path=asset_path,
+            )
         return service.document(doc_path)
 
     @router.get("/groups")
