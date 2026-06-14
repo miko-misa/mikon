@@ -729,25 +729,32 @@ class Store:
         config = self.read_json(self.run_dir(run_id) / "config.json")
         result: list[tuple[LineageNode, LineageEdge]] = []
 
-        def walk(value: Any, field_path: str) -> None:
+        def add_module(field_path: str, module_name: str, parent_node_id: str | None) -> str:
+            node_id = f"module:{run_id}:{field_path}:{module_name}"
+            dst = parent_node_id or f"run:{run_id}"
+            result.append(
+                (
+                    LineageNode(id=node_id, type="module", label=module_name, collapsed_into=f"run:{run_id}"),
+                    LineageEdge(src=node_id, dst=dst, type="composed-of-module"),
+                )
+            )
+            return node_id
+
+        def walk(value: Any, field_path: str, parent_module_id: str | None = None) -> None:
             if isinstance(value, dict):
+                current_parent = parent_module_id
                 module_name = value.get("__module__")
                 if isinstance(module_name, str):
-                    node_id = f"module:{run_id}:{field_path}:{module_name}"
-                    result.append(
-                        (
-                            LineageNode(id=node_id, type="module", label=module_name, collapsed_into=f"run:{run_id}"),
-                            LineageEdge(src=node_id, dst=f"run:{run_id}", type="composed-of-module"),
-                        )
-                    )
+                    current_parent = add_module(field_path, module_name, parent_module_id)
                 for key, item in value.items():
                     if key == "__module__":
                         continue
                     next_path = f"{field_path}.{key}" if field_path else str(key)
-                    walk(item, next_path)
+                    walk(item, next_path, current_parent)
             elif isinstance(value, list):
                 for index, item in enumerate(value):
-                    walk(item, f"{field_path}[{index}]")
+                    next_path = f"{field_path}[{index}]" if field_path else f"[{index}]"
+                    walk(item, next_path, parent_module_id)
 
         walk(config, "")
         return result
