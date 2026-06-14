@@ -19,6 +19,9 @@ export interface ConfigFormProps {
   values: Record<string, unknown>;
   onChange: (values: Record<string, unknown>) => void;
   disabled?: boolean;
+  mode?: "edit" | "readonly";
+  title?: string;
+  description?: string;
 }
 
 function prettifyKey(k: string): string {
@@ -65,6 +68,55 @@ function clamp(v: number, min: number, max: number) {
   return Math.max(min, Math.min(max, v));
 }
 
+function formatValue(value: unknown): string {
+  if (value === undefined) return "Not set";
+  if (value === null) return "null";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "string") return value || "\"\"";
+  if (typeof value === "number") return String(value);
+  return JSON.stringify(value);
+}
+
+function schemaHints(schema: Schema, optional: boolean): string[] {
+  const hints: string[] = [optional ? "optional" : "required"];
+  if (schema.default !== undefined) hints.push(`default ${formatValue(schema.default)}`);
+  if (schema.minimum !== undefined || schema.maximum !== undefined) {
+    const min = schema.minimum !== undefined ? String(schema.minimum) : "-∞";
+    const max = schema.maximum !== undefined ? String(schema.maximum) : "∞";
+    hints.push(`range ${min}–${max}`);
+  }
+  if (schema.multipleOf !== undefined) hints.push(`step ${schema.multipleOf}`);
+  if (Array.isArray(schema.enum)) {
+    hints.push(`allowed ${(schema.enum as unknown[]).map(formatValue).join(", ")}`);
+  }
+  if (schema.const !== undefined) hints.push(`constant ${formatValue(schema.const)}`);
+  return hints;
+}
+
+function ReadonlyValue({ value }: { value: unknown }) {
+  return (
+    <div className="min-h-9 rounded-md bg-muted/30 px-3 py-2 font-mono text-sm">
+      {formatValue(value)}
+    </div>
+  );
+}
+
+function FieldMeta({ items }: { items: string[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="mt-1 flex flex-wrap gap-1.5">
+      {items.map((item) => (
+        <span
+          key={item}
+          className="rounded bg-muted/60 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground"
+        >
+          {item}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 // Shared 2-column row wrapper for flat (non-object) fields
 function FieldRow({
   label,
@@ -72,12 +124,14 @@ function FieldRow({
   optional,
   children,
   alignTop,
+  meta,
 }: {
   label: string;
   description?: string;
   optional?: boolean;
   children: React.ReactNode;
   alignTop?: boolean;
+  meta?: string[];
 }) {
   return (
     <div
@@ -103,6 +157,9 @@ function FieldRow({
         )}
       </div>
       <div>{children}</div>
+      <div className="col-start-2">
+        <FieldMeta items={meta ?? []} />
+      </div>
     </div>
   );
 }
@@ -116,6 +173,8 @@ interface FieldProps {
   onChange: (v: unknown) => void;
   disabled?: boolean;
   depth?: number;
+  mode: "edit" | "readonly";
+  required?: boolean;
 }
 
 function Field({
@@ -127,12 +186,16 @@ function Field({
   onChange,
   disabled,
   depth = 0,
+  mode,
+  required = true,
 }: FieldProps) {
   const resolved = resolveSchema(rawSchema, rootSchema);
   const { schema, optional } = unwrapOptional(resolved);
   const fieldUi = (uiSchema?.[fieldKey] ?? {}) as Record<string, unknown>;
   const label = (schema.title as string | undefined) ?? prettifyKey(fieldKey);
   const description = schema.description as string | undefined;
+  const isOptional = optional || !required;
+  const meta = schemaHints(schema, isOptional);
 
   // Module ref
   if (schema["x-mikon-module-ref"] != null && Array.isArray(schema.oneOf)) {
@@ -147,7 +210,8 @@ function Field({
         onChange={onChange}
         disabled={disabled}
         depth={depth}
-        optional={optional}
+        optional={isOptional}
+        mode={mode}
       />
     );
   }
@@ -165,7 +229,17 @@ function Field({
         onChange={onChange}
         disabled={disabled}
         depth={depth}
+        mode={mode}
+        optional={isOptional}
       />
+    );
+  }
+
+  if (mode === "readonly") {
+    return (
+      <FieldRow label={label} description={description} optional={isOptional} meta={meta}>
+        <ReadonlyValue value={value} />
+      </FieldRow>
     );
   }
 
@@ -173,7 +247,7 @@ function Field({
   if (schema.type === "boolean") {
     const checked = Boolean(value ?? false);
     return (
-      <FieldRow label={label} description={description} optional={optional}>
+      <FieldRow label={label} description={description} optional={isOptional} meta={meta}>
         <Switch
           checked={checked}
           onCheckedChange={(v) => onChange(v)}
@@ -199,7 +273,7 @@ function Field({
         : (schema.multipleOf as number | undefined) ?? 0.01;
     const current = (value as number | null | undefined) ?? min;
     return (
-      <FieldRow label={label} description={description} optional={optional} alignTop>
+      <FieldRow label={label} description={description} optional={isOptional} alignTop meta={meta}>
         <div className="space-y-1.5">
           <div className="flex gap-2 items-center">
             <Slider
@@ -238,7 +312,7 @@ function Field({
   if (schema.enum != null && Array.isArray(schema.enum)) {
     const options = schema.enum as unknown[];
     return (
-      <FieldRow label={label} description={description} optional={optional}>
+      <FieldRow label={label} description={description} optional={isOptional} meta={meta}>
         <Select
           value={value != null ? String(value) : ""}
           onValueChange={(v) => {
@@ -268,7 +342,7 @@ function Field({
   // String const
   if (schema.const != null) {
     return (
-      <FieldRow label={label} description={description}>
+      <FieldRow label={label} description={description} meta={meta}>
         <Input value={String(schema.const)} disabled readOnly />
       </FieldRow>
     );
@@ -278,7 +352,7 @@ function Field({
   const inputType =
     schema.type === "number" || schema.type === "integer" ? "number" : "text";
   return (
-    <FieldRow label={label} description={description} optional={optional}>
+    <FieldRow label={label} description={description} optional={isOptional} meta={meta}>
       <Input
         type={inputType}
         value={value != null ? String(value) : ""}
@@ -307,6 +381,8 @@ function ObjectField({
   onChange,
   disabled,
   depth,
+  mode,
+  optional,
 }: {
   label: string;
   description?: string;
@@ -317,10 +393,15 @@ function ObjectField({
   onChange: (v: unknown) => void;
   disabled?: boolean;
   depth: number;
+  mode: "edit" | "readonly";
+  optional: boolean;
 }) {
-  const [open, setOpen] = useState(depth < 2);
+  const [open, setOpen] = useState(mode === "readonly" ? depth < 3 : depth < 2);
   const objValue = (value as Record<string, unknown> | null | undefined) ?? {};
   const properties = schema.properties as Record<string, Schema> | undefined;
+  const requiredFields = new Set(
+    Array.isArray(schema.required) ? (schema.required as string[]) : []
+  );
 
   if (!properties) return null;
 
@@ -329,17 +410,20 @@ function ObjectField({
   }
 
   return (
-    <div className={cn("mt-2 rounded-md border border-border", depth > 0 && "bg-muted/20")}>
+    <div className={cn("py-2", depth > 0 && "ml-2 border-l border-border/70 pl-4")}>
       <button
         type="button"
-        className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-medium hover:bg-accent/20 transition-colors rounded-md"
+        className="flex w-full items-center justify-between py-2 text-left text-sm font-medium transition-colors hover:text-primary"
         onClick={() => setOpen((o) => !o)}
       >
         <span className="flex items-center gap-2">
           {depth > 0 && (
             <span className="text-xs text-muted-foreground font-mono">{"{ }"}</span>
           )}
-          {label}
+          <span>{label}</span>
+          {optional && (
+            <span className="text-xs font-normal text-muted-foreground">(optional)</span>
+          )}
         </span>
         <span className="flex items-center gap-2">
           {!open && (
@@ -355,10 +439,10 @@ function ObjectField({
         </span>
       </button>
       {description && !open && (
-        <p className="px-4 pb-2 text-xs text-muted-foreground">{description}</p>
+        <p className="pb-2 text-xs text-muted-foreground">{description}</p>
       )}
       {open && (
-        <div className="px-4 pb-3">
+        <div className="pb-2">
           {description && (
             <p className="text-xs text-muted-foreground mb-2">{description}</p>
           )}
@@ -374,6 +458,8 @@ function ObjectField({
                 onChange={(v) => handleChange(key, v)}
                 disabled={disabled}
                 depth={depth + 1}
+                mode={mode}
+                required={requiredFields.has(key)}
               />
             ))}
             {Object.keys(properties).length === 0 && (
@@ -397,6 +483,7 @@ function ModuleRefField({
   disabled,
   depth,
   optional,
+  mode,
 }: {
   label: string;
   description?: string;
@@ -408,6 +495,7 @@ function ModuleRefField({
   disabled?: boolean;
   depth: number;
   optional: boolean;
+  mode: "edit" | "readonly";
 }) {
   const objValue = (value as Record<string, unknown> | null | undefined) ?? {};
   const currentType = (objValue.__module__ ?? objValue.__type__ ?? objValue.type ?? objValue._type) as
@@ -418,7 +506,7 @@ function ModuleRefField({
     .map((o) => (o.title as string | undefined) ?? "")
     .filter(Boolean);
 
-  const selectedName = currentType ?? (moduleNames[0] || "");
+  const selectedName = currentType ?? (mode === "edit" ? moduleNames[0] || "" : "");
   const selectedSchema = options.find(
     (o) => o.title === selectedName || o.title === currentType
   );
@@ -440,22 +528,26 @@ function ModuleRefField({
   return (
     <div className="py-1">
       <FieldRow label={label} description={description} optional={optional}>
-        <Select
-          value={selectedName}
-          onValueChange={selectModule}
-          disabled={disabled}
-        >
-          <SelectTrigger>
-            <SelectValue placeholder="Select module..." />
-          </SelectTrigger>
-          <SelectContent>
-            {moduleNames.map((name) => (
-              <SelectItem key={name} value={name}>
-                {name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {mode === "readonly" ? (
+          <ReadonlyValue value={selectedName || undefined} />
+        ) : (
+          <Select
+            value={selectedName}
+            onValueChange={selectModule}
+            disabled={disabled}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Select module..." />
+            </SelectTrigger>
+            <SelectContent>
+              {moduleNames.map((name) => (
+                <SelectItem key={name} value={name}>
+                  {name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </FieldRow>
       {selectedSchema && selectedSchema.properties != null && (
         <ObjectField
@@ -469,6 +561,8 @@ function ModuleRefField({
           }
           disabled={disabled}
           depth={depth + 1}
+          mode={mode}
+          optional={false}
         />
       )}
     </div>
@@ -481,8 +575,14 @@ export function ConfigForm({
   values,
   onChange,
   disabled,
+  mode = "edit",
+  title,
+  description,
 }: ConfigFormProps) {
   const properties = schema.properties as Record<string, Schema> | undefined;
+  const requiredFields = new Set(
+    Array.isArray(schema.required) ? (schema.required as string[]) : []
+  );
 
   if (!properties) {
     return (
@@ -497,20 +597,34 @@ export function ConfigForm({
   }
 
   return (
-    <div className="divide-y divide-border/50">
-      {Object.entries(properties).map(([key, propSchema]) => (
-        <Field
-          key={key}
-          fieldKey={key}
-          schema={propSchema as Schema}
-          rootSchema={schema}
-          uiSchema={uiSchema}
-          value={values[key]}
-          onChange={(v) => handleChange(key, v)}
-          disabled={disabled}
-          depth={0}
-        />
-      ))}
+    <div className="space-y-4">
+      {(title || description) && (
+        <div>
+          {title && <h2 className="text-base font-semibold">{title}</h2>}
+          {description && (
+            <p className="mt-1 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+              {description}
+            </p>
+          )}
+        </div>
+      )}
+      <div className="divide-y divide-border/50 border-t border-border/70">
+        {Object.entries(properties).map(([key, propSchema]) => (
+          <Field
+            key={key}
+            fieldKey={key}
+            schema={propSchema as Schema}
+            rootSchema={schema}
+            uiSchema={uiSchema}
+            value={values[key]}
+            onChange={(v) => handleChange(key, v)}
+            disabled={disabled || mode === "readonly"}
+            depth={0}
+            mode={mode}
+            required={requiredFields.has(key)}
+          />
+        ))}
+      </div>
     </div>
   );
 }

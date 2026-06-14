@@ -5,12 +5,13 @@ import type {
   MetricRecord,
   MetricsResponse,
   Artifact,
-  LineageGraph,
   Group,
 } from "@/lib/types";
 import { StatusBadge } from "@/components/StatusBadge";
 import { MetricChart } from "@/components/MetricChart";
 import { LogViewer } from "@/components/LogViewer";
+import { LineageCanvas } from "@/components/LineageCanvas";
+import { ConfigForm } from "@/components/ConfigForm";
 import { TagInput } from "@/components/TagInput";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -19,7 +20,6 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -320,30 +320,74 @@ function OverviewTab({
   onRunChange: (r: RunDetail) => void;
   navigate: (path: string) => void;
 }) {
+  const [rawOpen, setRawOpen] = useState(false);
+  const hasConfigSchema =
+    run.json_schema != null &&
+    typeof run.json_schema === "object" &&
+    Object.keys(run.json_schema).length > 0 &&
+    run.json_schema.properties != null;
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <AnnotationsSection run={run} onRunChange={onRunChange} navigate={navigate} />
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Configuration</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <pre className="overflow-auto rounded-md bg-muted/30 p-4 text-xs font-mono max-h-96">
-            {JSON.stringify(run.config, null, 2)}
-          </pre>
-        </CardContent>
-      </Card>
-      {run.error && (
-        <Card className="border-destructive/50">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm text-destructive">Error</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <pre className="overflow-auto rounded-md bg-destructive/10 p-4 text-xs font-mono text-destructive max-h-48">
-              {run.error}
+      <section className="border-t border-border pt-4">
+        {hasConfigSchema ? (
+          <ConfigForm
+            schema={run.json_schema}
+            uiSchema={run.ui_schema}
+            values={run.config}
+            onChange={() => {}}
+            mode="readonly"
+            title="Configuration"
+            description="Resolved config recorded for this run. Field descriptions and constraints come from the current schema."
+          />
+        ) : (
+          <div>
+            <div className="mb-3">
+              <h2 className="text-sm font-semibold">Configuration</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Schema is unavailable, so the resolved config is shown as JSON.
+              </p>
+            </div>
+            <pre className="max-h-96 overflow-auto rounded-md bg-muted/30 p-4 font-mono text-xs">
+              {JSON.stringify(run.config, null, 2)}
             </pre>
-          </CardContent>
-        </Card>
+          </div>
+        )}
+        {hasConfigSchema && (
+          <div className="mt-4 border-t border-border pt-3">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between text-left text-xs font-medium uppercase tracking-wide text-muted-foreground hover:text-foreground"
+              onClick={() => setRawOpen((open) => !open)}
+            >
+              Raw JSON
+              {rawOpen ? (
+                <ChevronDown className="h-4 w-4" />
+              ) : (
+                <ChevronRight className="h-4 w-4" />
+              )}
+            </button>
+            {rawOpen && (
+              <pre className="mt-3 max-h-96 overflow-auto rounded-md bg-muted/30 p-4 font-mono text-xs">
+                {JSON.stringify(run.config, null, 2)}
+              </pre>
+            )}
+          </div>
+        )}
+      </section>
+      {run.error && (
+        <section className="border-t border-destructive/40 pt-4">
+          <div className="mb-3">
+            <h2 className="text-sm font-semibold text-destructive">Error</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Failure captured from the runner.
+            </p>
+          </div>
+          <pre className="max-h-48 overflow-auto rounded-md bg-destructive/10 p-4 font-mono text-xs text-destructive">
+            {run.error}
+          </pre>
+        </section>
       )}
     </div>
   );
@@ -630,195 +674,6 @@ function ArtifactsTab({ runId }: { runId: string }) {
   );
 }
 
-// ─── Lineage Tab (ReactFlow graph) ──────────────────────────────────────────
-
-import ReactFlow, {
-  Background,
-  Controls,
-  MiniMap,
-  type Node as RFNode,
-  type Edge as RFEdge,
-  MarkerType,
-  Handle,
-  Position,
-} from "reactflow";
-import "reactflow/dist/style.css";
-import dagre from "@dagrejs/dagre";
-import {
-  Play,
-  Database,
-  Code2,
-  Paperclip,
-} from "lucide-react";
-
-const NODE_W = 190;
-const NODE_H = 64;
-
-function layoutGraph(nodes: RFNode[], edges: RFEdge[]) {
-  const g = new dagre.graphlib.Graph();
-  g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: "TB", nodesep: 60, ranksep: 80 });
-  nodes.forEach((n) => g.setNode(n.id, { width: NODE_W, height: NODE_H }));
-  edges.forEach((e) => g.setEdge(e.source, e.target));
-  dagre.layout(g);
-  return nodes.map((n) => {
-    const pos = g.node(n.id);
-    return { ...n, position: { x: pos.x - NODE_W / 2, y: pos.y - NODE_H / 2 } };
-  });
-}
-
-const NODE_STYLES: Record<
-  string,
-  { icon: React.ComponentType<{ className?: string }>; color: string }
-> = {
-  run:      { icon: Play,      color: "border-blue-500/60 bg-blue-500/10" },
-  dataset:  { icon: Database,  color: "border-green-500/60 bg-green-500/10" },
-  module:   { icon: Code2,     color: "border-purple-500/60 bg-purple-500/10" },
-  artifact: { icon: Paperclip, color: "border-zinc-500/60 bg-zinc-500/10" },
-};
-
-interface LineageNodeData {
-  label: string;
-  nodeType: string;
-  isCurrent: boolean;
-  navigate: (path: string) => void;
-  nodeId: string;
-}
-
-function LineageNode({ data }: { data: LineageNodeData }) {
-  const style = NODE_STYLES[data.nodeType] ?? NODE_STYLES.artifact;
-  const Icon = style.icon;
-  const isRun = data.nodeType === "run";
-
-  return (
-    <div
-      className={cn(
-        "rounded-lg border-2 px-3 py-2 text-xs shadow-sm select-none transition-all",
-        style.color,
-        data.isCurrent && "ring-2 ring-primary ring-offset-1 ring-offset-background",
-        isRun && "cursor-pointer hover:brightness-110"
-      )}
-      style={{ width: NODE_W, minHeight: NODE_H }}
-      onClick={() => {
-        if (isRun) {
-          const runId = data.nodeId.startsWith("run:") ? data.nodeId.slice(4) : data.nodeId;
-          data.navigate(`/runs/${runId}`);
-        }
-      }}
-    >
-      <Handle type="target" position={Position.Top} className="bg-muted-foreground!" />
-      <div className="flex items-start gap-1.5">
-        <Icon className="h-3.5 w-3.5 shrink-0 mt-0.5 opacity-70" />
-        <div className="min-w-0">
-          <p className="font-medium truncate leading-tight">{data.label}</p>
-          <p className="text-muted-foreground opacity-80 capitalize mt-0.5">
-            {data.nodeType}
-            {data.isCurrent && (
-              <span className="ml-1 text-primary font-semibold">← current</span>
-            )}
-          </p>
-        </div>
-      </div>
-      <Handle type="source" position={Position.Bottom} className="bg-muted-foreground!" />
-    </div>
-  );
-}
-
-const nodeTypes = { lineageNode: LineageNode };
-
-function LineageTab({
-  runId,
-  navigate,
-}: {
-  runId: string;
-  navigate: (path: string) => void;
-}) {
-  const [lineage, setLineage] = useState<LineageGraph | null>(null);
-
-  useEffect(() => {
-    api
-      .get<LineageGraph>(`/api/runs/${runId}/lineage`)
-      .then(setLineage)
-      .catch(() => {});
-  }, [runId]);
-
-  if (!lineage) {
-    return <Skeleton className="h-96 w-full" />;
-  }
-
-  // Nodes that are collapsed into another are hidden
-  const visibleNodeIds = new Set(
-    lineage.nodes.filter((n) => !n.collapsed_into).map((n) => n.id)
-  );
-
-  const rfNodes: RFNode[] = lineage.nodes
-    .filter((n) => visibleNodeIds.has(n.id))
-    .map((n) => ({
-      id: n.id,
-      type: "lineageNode",
-      position: { x: 0, y: 0 },
-      data: {
-        label: n.label,
-        nodeType: n.type,
-        isCurrent: n.id === lineage.center,
-        navigate,
-        nodeId: n.id,
-      } satisfies LineageNodeData,
-    }));
-
-  const rfEdges: RFEdge[] = lineage.edges
-    .filter((e) => visibleNodeIds.has(e.src) && visibleNodeIds.has(e.dst))
-    .map((e, i) => ({
-      id: `e-${i}`,
-      source: e.src,
-      target: e.dst,
-      label: e.type.replace(/-/g, " "),
-      labelStyle: { fontSize: 10, fill: "hsl(var(--muted-foreground))" },
-      labelBgStyle: { fill: "hsl(var(--background))", fillOpacity: 0.8 },
-      markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 },
-      style: { stroke: "hsl(var(--muted-foreground))", strokeWidth: 1.5 },
-      animated: e.type === "produces-dataset",
-    }));
-
-  if (rfNodes.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-40 text-sm text-muted-foreground">
-        No lineage data
-      </div>
-    );
-  }
-
-  const layoutedNodes = layoutGraph(rfNodes, rfEdges);
-
-  return (
-    <div className="h-130 rounded-lg border border-border overflow-hidden">
-      <ReactFlow
-        nodes={layoutedNodes}
-        edges={rfEdges}
-        nodeTypes={nodeTypes}
-        fitView
-        fitViewOptions={{ padding: 0.2 }}
-        minZoom={0.2}
-        maxZoom={2}
-        proOptions={{ hideAttribution: true }}
-      >
-        <Background color="hsl(var(--muted-foreground))" gap={20} size={0.5} />
-        <Controls />
-        <MiniMap
-          nodeColor={(n) => {
-            const t = (n.data as LineageNodeData).nodeType;
-            if (t === "run") return "#3b82f6";
-            if (t === "dataset") return "#22c55e";
-            if (t === "module") return "#a855f7";
-            return "#71717a";
-          }}
-          maskColor="rgba(0,0,0,0.3)"
-        />
-      </ReactFlow>
-    </div>
-  );
-}
-
 // ─── Main RunDetailPage ───────────────────────────────────────────────────────
 
 export function RunDetailPage({ runId, navigate }: RunDetailPageProps) {
@@ -1054,7 +909,7 @@ export function RunDetailPage({ runId, navigate }: RunDetailPageProps) {
         </TabsContent>
 
         <TabsContent value="lineage" className="mt-4">
-          <LineageTab runId={runId} navigate={navigate} />
+          <LineageCanvas runId={runId} navigate={navigate} />
         </TabsContent>
       </Tabs>
     </div>
