@@ -1,18 +1,42 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { api } from "@/lib/api";
 import type { DatasetBuilderDetail, GpuInfo } from "@/lib/types";
 import { ConfigForm } from "@/components/ConfigForm";
 import { GpuSelector } from "@/components/GpuSelector";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { FileCode, Hammer } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 
 interface DatasetBuilderPageProps {
   builderName: string;
   navigate: (path: string) => void;
+}
+
+function WorkbenchSection({
+  title,
+  description,
+  children,
+  className,
+}: {
+  title: string;
+  description?: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={cn("border-t border-border pt-5", className)}>
+      <div className="mb-3">
+        <h2 className="text-sm font-semibold">{title}</h2>
+        {description && (
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{description}</p>
+        )}
+      </div>
+      <div className="space-y-3">{children}</div>
+    </section>
+  );
 }
 
 function buildDefaults(schema: Record<string, unknown>): Record<string, unknown> {
@@ -85,61 +109,66 @@ export function DatasetBuilderPage({
   }
 
   return (
-    <div className="p-6 space-y-6 max-w-3xl">
-      <div>
-        <div className="flex items-center gap-2 mb-1">
-          <Hammer className="h-5 w-5 text-primary" />
-          <h1 className="text-2xl font-bold">{builder.name}</h1>
+    <div className="p-6">
+      <div className="mx-auto max-w-7xl space-y-6">
+        <div>
+          <div className="mb-1 flex items-center gap-2">
+            <Hammer className="h-5 w-5 text-primary" />
+            <h1 className="text-2xl font-bold">{builder.name}</h1>
+          </div>
+          {builder.doc && (
+            <p className="max-w-3xl text-sm text-muted-foreground">{builder.doc}</p>
+          )}
+          <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <FileCode className="h-3 w-3" />
+            {builder.source_file}:{builder.lineno}
+          </div>
         </div>
-        {builder.doc && (
-          <p className="text-sm text-muted-foreground">{builder.doc}</p>
-        )}
-        <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
-          <FileCode className="h-3 w-3" />
-          {builder.source_file}:{builder.lineno}
+
+        <Separator />
+
+        <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+          <main className="min-w-0">
+            <ConfigForm
+              schema={builder.json_schema}
+              uiSchema={builder.ui_schema}
+              values={values}
+              onChange={setValues}
+              disabled={launching}
+              mode="edit"
+              title="Configuration"
+              description="Set the builder inputs that will be used to produce the dataset metadata."
+            />
+          </main>
+
+          <aside className="space-y-6 border-t border-border pt-6 lg:sticky lg:top-6 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
+            <WorkbenchSection
+              title="Compute"
+              description="Dataset builders can run CPU-only or use selected GPUs when requested."
+              className="border-t-0 pt-0"
+            >
+              <GpuSelector
+                gpus={gpus}
+                selected={selectedGpus}
+                onChange={setSelectedGpus}
+                disabled={launching}
+              />
+            </WorkbenchSection>
+
+            <div className="border-t border-border pt-5">
+              <Button
+                className="w-full"
+                size="lg"
+                onClick={handleLaunch}
+                disabled={launching}
+              >
+                <Hammer className="h-4 w-4" />
+                {launching ? "Building..." : "Build Dataset"}
+              </Button>
+            </div>
+          </aside>
         </div>
       </div>
-
-      <Separator />
-
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Configuration</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ConfigForm
-            schema={builder.json_schema}
-            uiSchema={builder.ui_schema}
-            values={values}
-            onChange={setValues}
-            disabled={launching}
-          />
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">GPU Selection</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <GpuSelector
-            gpus={gpus}
-            selected={selectedGpus}
-            onChange={setSelectedGpus}
-            disabled={launching}
-          />
-        </CardContent>
-      </Card>
-
-      <Button
-        className="w-full"
-        size="lg"
-        onClick={handleLaunch}
-        disabled={launching}
-      >
-        <Hammer className="h-4 w-4" />
-        {launching ? "Building..." : "Build Dataset"}
-      </Button>
     </div>
   );
 }
