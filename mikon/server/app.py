@@ -37,7 +37,13 @@ def create_app(
         yield
         registry.stop_watching()
 
-    app = FastAPI(title="mikon", lifespan=lifespan)
+    app = FastAPI(
+        title="mikon",
+        lifespan=lifespan,
+        docs_url="/api/docs-ui",
+        redoc_url="/api/redoc",
+        openapi_url="/api/openapi.json",
+    )
     app.state.settings = resolved_settings
     app.state.store = store
     app.state.registry = registry
@@ -47,7 +53,7 @@ def create_app(
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_origins=["*"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
