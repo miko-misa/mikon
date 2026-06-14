@@ -84,6 +84,8 @@ class RunDetail(RunSummary):
     config_hash: str
     schema_hash: str
     config: dict[str, Any]
+    json_schema: dict[str, Any] = Field(default_factory=dict)
+    ui_schema: dict[str, Any] = Field(default_factory=dict)
     error: str | None = None
     metric_names: list[str] = Field(default_factory=list)
     artifact_count: int = 0

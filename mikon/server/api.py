@@ -21,9 +21,26 @@ from mikon.server.models import (
     GroupCreate,
     GroupUpdate,
     ManualLinkCreate,
+    RunDetail,
     RunStatus,
 )
 from mikon.server.problems import ProblemException
+
+
+def _with_config_schema(detail: RunDetail, request: Request) -> RunDetail:
+    registry = request.app.state.registry
+    if detail.kind == "dataset":
+        definition = registry.get_dataset_builder(detail.job)
+    else:
+        definition = registry.get_job(detail.job)
+    if definition is None:
+        return detail.model_copy(update={"json_schema": {}, "ui_schema": {}})
+    return detail.model_copy(
+        update={
+            "json_schema": definition.get("json_schema", {}),
+            "ui_schema": definition.get("ui_schema", {}),
+        }
+    )
 
 
 def create_api_router() -> APIRouter:
@@ -86,15 +103,15 @@ def create_api_router() -> APIRouter:
 
     @router.get("/runs/{run_id}")
     def get_run(run_id: str, request: Request):
-        return request.app.state.store.get_run(run_id)
+        return _with_config_schema(request.app.state.store.get_run(run_id), request)
 
     @router.post("/runs/{run_id}/stop")
     def stop_run(run_id: str, request: Request):
-        return request.app.state.runner.stop_run(run_id)
+        return _with_config_schema(request.app.state.runner.stop_run(run_id), request)
 
     @router.patch("/runs/{run_id}")
     def patch_run(run_id: str, body: AnnotationsPatch, request: Request):
-        return request.app.state.store.patch_annotations(run_id, body)
+        return _with_config_schema(request.app.state.store.patch_annotations(run_id, body), request)
 
     @router.delete("/runs/{run_id}", status_code=204)
     def delete_run(run_id: str, request: Request):

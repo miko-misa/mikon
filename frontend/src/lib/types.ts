@@ -36,6 +36,8 @@ export type RunDetail = RunSummary & {
   config_hash: string;
   schema_hash: string;
   config: Record<string, unknown>;
+  json_schema: Record<string, unknown>;
+  ui_schema: Record<string, unknown>;
   error?: string | null;
   metric_names: string[];
   artifact_count: number;

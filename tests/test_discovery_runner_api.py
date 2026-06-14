@@ -715,6 +715,13 @@ def test_runner_detached_run_lifecycle_without_gpu_backend(tmp_path: Path, monke
             time.sleep(0.2)
         assert detail is not None
         assert detail["status"] == "completed", detail
+        assert detail["json_schema"]["properties"]["epochs"]["default"] == 2
+        assert detail["ui_schema"]["epochs"]["ui:widget"] == "range"
+        with app.state.registry._lock:
+            app.state.registry._jobs = {}
+        schema_fallback = client.get(f"/api/runs/{run_id}").json()
+        assert schema_fallback["json_schema"] == {}
+        assert schema_fallback["ui_schema"] == {}
         metrics = client.get(f"/api/runs/{run_id}/metrics?since=-1").json()
         assert [record["name"] for record in metrics["records"]] == ["loss", "loss"]
         artifacts = client.get(f"/api/runs/{run_id}/artifacts").json()
@@ -813,6 +820,7 @@ def test_dataset_builder_api_runs_cpu_only_and_records_lineage(tmp_path: Path) -
     assert detail is not None
     assert detail["kind"] == "dataset"
     assert detail["status"] == "completed", detail
+    assert detail["json_schema"]["properties"]["split"]["default"] == "train"
     assert dataset["source"] == "builder"
     assert dataset["builder_run_id"] == run_id
     assert {node["id"] for node in lineage["nodes"]} >= {f"run:{run_id}", "dataset:mnist"}
@@ -1493,7 +1501,14 @@ def test_lineage_includes_dataset_artifact_module_and_manual_edges(tmp_path: Pat
     consumer = store.create_run(
         run_id="consumer",
         job="train",
-        config={"block": {"__module__": "Linear", "width": 3}},
+        config={
+            "block": {
+                "__module__": "Outer",
+                "width": 3,
+                "inner": {"__module__": "Leaf", "scale": 2},
+                "layers": [{"__module__": "Layer", "size": 4}],
+            }
+        },
         gpus=["nvidia:0"],
         schema_hash="schema",
         command=[],
@@ -1511,7 +1526,7 @@ def test_lineage_includes_dataset_artifact_module_and_manual_edges(tmp_path: Pat
     assert invalid_link.value.status == 422
     link = store.create_manual_link("run:source", "run:consumer", "inspired")
     dataset_link = store.create_manual_link("dataset:mnist", "run:source", "dataset source")
-    module_link = store.create_manual_link("module:consumer:block:Linear", "run:source", "module source")
+    module_link = store.create_manual_link("module:consumer:block:Outer", "run:source", "module source")
     artifact_link = store.create_manual_link("artifact:source:model.pt", "run:consumer", "picked weights")
     (store.links_path).write_text(
         store.links_path.read_text(encoding="utf-8") + '{"id":"legacy","src":"bad","dst":"also-bad","note":null}\n',
@@ -1532,16 +1547,20 @@ def test_lineage_includes_dataset_artifact_module_and_manual_edges(tmp_path: Pat
         "run:consumer",
         "run:source",
         "dataset:mnist",
-        "module:consumer:block:Linear",
+        "module:consumer:block:Outer",
+        "module:consumer:block.inner:Leaf",
+        "module:consumer:block.layers[0]:Layer",
         "artifact:source:model.pt",
     }
     assert {(edge.src, edge.dst, edge.type) for edge in graph.edges} >= {
         ("dataset:mnist", "run:consumer", "uses-dataset"),
         ("run:source", "run:consumer", "consumes-artifact"),
-        ("module:consumer:block:Linear", "run:consumer", "composed-of-module"),
+        ("module:consumer:block:Outer", "run:consumer", "composed-of-module"),
+        ("module:consumer:block.inner:Leaf", "module:consumer:block:Outer", "composed-of-module"),
+        ("module:consumer:block.layers[0]:Layer", "module:consumer:block:Outer", "composed-of-module"),
         ("run:source", "run:consumer", "manual"),
         ("dataset:mnist", "run:source", "manual"),
-        ("module:consumer:block:Linear", "run:source", "manual"),
+        ("module:consumer:block:Outer", "run:source", "manual"),
         ("artifact:source:model.pt", "run:consumer", "manual"),
     }
     assert any(edge.link_id == artifact_link.id for edge in graph.edges)
