@@ -1,69 +1,71 @@
-# mikon 使い方ガイド
+# mikon Usage Guide
 
-> Phase 1〜4 の全実装済み機能を対象にした開発者向け完全リファレンスです。
+> 日本語版: [USAGE-ja.md](USAGE-ja.md)
+
+> A complete developer reference covering all implemented features (Phases 1–4).
 
 ---
 
-## 目次
+## Table of Contents
 
-1. [インストール](#1-インストール)
-2. [プロジェクトの初期化](#2-プロジェクトの初期化)
-3. [ジョブの書き方](#3-ジョブの書き方)
-4. [Config の設計](#4-config-の設計)
+1. [Installation](#1-installation)
+2. [Project Initialization](#2-project-initialization)
+3. [Writing Jobs](#3-writing-jobs)
+4. [Designing Config](#4-designing-config)
 5. [RunContext API](#5-runcontext-api)
-6. [サーバーの起動](#6-サーバーの起動)
-7. [CLIリファレンス](#7-cli-リファレンス)
-8. [モジュールシステム](#8-モジュールシステム)
-9. [データセット](#9-データセット)
-10. [リネージュ](#10-リネージュ)
-11. [整理機能（タグ・グループ・スター）](#11-整理機能タググループスター)
-12. [ドキュメント閲覧](#12-ドキュメント閲覧)
-13. [mikon.toml リファレンス](#13-mikontoml-リファレンス)
-14. [ストアのレイアウト](#14-ストアのレイアウト)
-15. [GPU管理](#15-gpu-管理)
-16. [認証・アクセス制御](#16-認証アクセス制御)
-17. [API エラーモデル](#17-api-エラーモデル)
+6. [Starting the Server](#6-starting-the-server)
+7. [CLI Reference](#7-cli-reference)
+8. [Module System](#8-module-system)
+9. [Datasets](#9-datasets)
+10. [Lineage](#10-lineage)
+11. [Organization: Tags, Groups, and Stars](#11-organization-tags-groups-and-stars)
+12. [Document Viewer](#12-document-viewer)
+13. [mikon.toml Reference](#13-mikontoml-reference)
+14. [Store Layout](#14-store-layout)
+15. [GPU Management](#15-gpu-management)
+16. [Authentication and Access Control](#16-authentication-and-access-control)
+17. [API Error Model](#17-api-error-model)
 
 ---
 
-## 1. インストール
+## 1. Installation
 
-要件：**Python 3.11+**、GPUサーバー（NVIDIA / AMD ROCm どちらでも可）。
+Requirements: **Python 3.11+**, a GPU server (NVIDIA or AMD ROCm).
 
 ```bash
-# uv の場合（推奨）
+# With uv (recommended)
 uv add mikon
 
-# pip の場合
+# With pip
 pip install mikon
 ```
 
-依存ライブラリ（`pynvml`・`psutil`・`watchfiles` など）は自動で入ります。`nvidia-smi` はドライバに含まれるため追加導入は不要です。AMD の場合は `amdsmi` または `rocm-smi` / `amd-smi` CLI のいずれかが利用できれば動作します。
+Dependencies (`pynvml`, `psutil`, `watchfiles`, etc.) are installed automatically. `nvidia-smi` is bundled with the driver and does not need to be installed separately. For AMD, mikon works with `amdsmi` or the `rocm-smi` / `amd-smi` CLI.
 
 ---
 
-## 2. プロジェクトの初期化
+## 2. Project Initialization
 
 ```bash
 cd /your/project
 mikon init
 ```
 
-生成物：
+Generated files:
 
 ```
-mikon.toml          # サーバー設定
+mikon.toml          # Server configuration
 src/
-  example.py        # サンプルジョブ（削除して構いません）
+  example.py        # Sample job (safe to delete)
 ```
 
-既存ファイルを上書きしたい場合は `--force` を渡します。
+Pass `--force` to overwrite existing files.
 
 ---
 
-## 3. ジョブの書き方
+## 3. Writing Jobs
 
-「ジョブ」とは、起動してGPU上で実行し、成果物を残して終わる処理単位の定義です。**関数に `@mikon.job` デコレータを付けるだけ**でサーバーに自動認識されます（登録作業は不要）。
+A "job" is a unit of work that runs on a GPU, produces artifacts, and exits. **Just add the `@mikon.job` decorator to a function** — mikon discovers it automatically with no registration step.
 
 ```python
 import mikon
@@ -89,32 +91,32 @@ def train(config: TrainConfig, ctx: RunContext) -> None:
     ctx.log_artifact("model.pt", ckpt)
 ```
 
-**シグネチャの制約**：
+**Signature requirements:**
 
 ```python
-def fn(config: <Configサブクラス>, ctx: RunContext) -> None
+def fn(config: <Config subclass>, ctx: RunContext) -> None
 ```
 
-- 第1引数は `Config` のサブクラス（名前は任意）
-- 第2引数は `RunContext`（名前は任意）
-- 戻り値は `None`（無視されます）
+- First argument: a subclass of `Config` (the parameter name is up to you)
+- Second argument: `RunContext` (the parameter name is up to you)
+- Return value: `None` (ignored)
 
-`@mikon.job` にはオプション引数 `name=` があります：
+`@mikon.job` accepts an optional `name=` argument:
 
 ```python
-@mikon.job(name="my-train")    # UIに表示される名前を上書き
+@mikon.job(name="my-train")    # Override the name shown in the UI
 def train(...): ...
 ```
 
-名前は `[A-Za-z0-9_.-]+` のみ使用可能です。省略するとデコレートした関数の `__name__` が使われます。
+Names must match `[A-Za-z0-9_.-]+`. When omitted, the decorated function's `__name__` is used.
 
-`mikon.toml` の `watch` で指定したディレクトリ配下の Python ファイルが自動スキャンされます。ファイルを保存すると `watchfiles` が検知してサーバーが再読み込みします（サーバー再起動不要）。
+Python files in the directories listed under `watch` in `mikon.toml` are scanned automatically. Saving a file triggers `watchfiles` to reload the registry — no server restart needed.
 
 ---
 
-## 4. Config の設計
+## 4. Designing Config
 
-`mikon.Config` は **Pydantic v2 の `BaseModel`** を継承したクラスです。フィールドの制約がそのままUIのフォームに反映されます。
+`mikon.Config` extends **Pydantic v2's `BaseModel`**. Field constraints are reflected directly in the auto-generated UI form.
 
 ```python
 from mikon import Config
@@ -122,17 +124,17 @@ from pydantic import Field
 from typing import Literal
 
 class MyConfig(Config):
-    # 数値 + minimum/maximum 両方あり → スライダになる
+    # Numeric field with both minimum and maximum → rendered as a slider
     lr: float = Field(1e-3, gt=0, le=1)
     batch: int = Field(32, ge=1, le=512)
 
-    # Literal / Enum → セレクトになる
+    # Literal / Enum → rendered as a select
     optimizer: Literal["adam", "sgd", "adamw"] = "adam"
 
-    # Optional フィールド
+    # Optional field
     weight_decay: float | None = None
 
-    # ネストしたコンフィグ（折り畳みセクションになる）
+    # Nested Config (rendered as a collapsible section)
     class SchedulerConfig(Config):
         type: Literal["cosine", "linear"] = "cosine"
         warmup: int = Field(100, ge=0)
@@ -140,199 +142,201 @@ class MyConfig(Config):
     scheduler: SchedulerConfig = SchedulerConfig()
 ```
 
-**UI 自動変換ルール**：
+**UI auto-mapping rules:**
 
-| 型・制約 | UIウィジェット |
+| Type / Constraint | UI Widget |
 | --- | --- |
-| `int` / `float` + `minimum` と `maximum` 両方あり | スライダ |
-| `Literal[...]` / `Enum` | セレクト |
-| `str` | テキスト入力 |
-| `bool` | チェックボックス |
-| ネストした `Config` サブクラス | 折り畳みセクション |
-| `ModuleRef[T]` / `ModuleFactory[T]` | モジュール選択 + サブフォーム |
+| `int` / `float` with both `minimum` and `maximum` | Slider |
+| `Literal[...]` / `Enum` | Select |
+| `str` | Text input |
+| `bool` | Checkbox |
+| Nested `Config` subclass | Collapsible section |
+| `ModuleRef[T]` / `ModuleFactory[T]` | Module selector + sub-form |
 
-**`description` をヘルプとして表示**：
+**Using `description` as help text:**
 
 ```python
-lr: float = Field(1e-3, gt=0, le=1, description="学習率（Adam向け推奨: 1e-3〜3e-4）")
+lr: float = Field(1e-3, gt=0, le=1, description="Learning rate (recommended for Adam: 1e-3 to 3e-4)")
 ```
 
-**`--set` でCLIから値を上書きする場合の型変換**：
+**Type coercion rules for `--set` on the CLI:**
 
-- JSON として解釈できる値（数値・真偽値・配列・オブジェクト）はその型になります
-- 解釈できなければ文字列として扱います
-- ドット区切りでネストした値を指定できます：`model.depth=50`
+- Values that parse as valid JSON (numbers, booleans, arrays, objects) are treated as that type
+- Values that do not parse as JSON are treated as strings
+- Dotted keys create nested dicts: `model.depth=50`
 
 ---
 
 ## 5. RunContext API
 
-ジョブの第2引数に注入されるランタイムハンドルです。
+`RunContext` is the runtime handle injected as the second argument to every job.
 
-### 5.1 プロパティ
+### 5.1 Properties
 
-| プロパティ | 型 | 説明 |
+| Property | Type | Description |
 | --- | --- | --- |
-| `ctx.artifacts_dir` | `pathlib.Path` | 成果物の出力先ディレクトリ。起動時に自動作成済み。 |
+| `ctx.artifacts_dir` | `pathlib.Path` | Output directory for artifacts. Created automatically at launch. |
 
-### 5.2 メトリクス
+### 5.2 Metrics
 
 ```python
 ctx.log_metric(name: str, value: int | float, step: int | None = None) -> None
 ```
 
-- `name`：系列名（例：`"loss"`, `"accuracy/val"`）
-- `value`：数値（`int` または `float`）
-- `step`：省略すると記録は単純な時系列になります。`step=epoch` のように渡すと X 軸が step になります
+- `name`: Series name (e.g. `"loss"`, `"accuracy/val"`)
+- `value`: Numeric value (`int` or `float`)
+- `step`: Omitting it produces a simple time series. Passing `step=epoch` sets the X axis to step values.
 
-ダッシュボードのチャートに数秒遅れでライブ反映されます。ストアへの書き込みはスレッドセーフです。
+Records appear in the dashboard chart within a few seconds. Writes are thread-safe.
 
-### 5.3 成果物
+### 5.3 Artifacts
 
 ```python
 ctx.log_artifact(name: str, path: str | pathlib.Path) -> pathlib.Path
 ```
 
-- `name`：成果物のエイリアス名。パス区切り（`/`）を含めてサブディレクトリ構成にできます
-- `path`：ファイルまたはディレクトリのパス（ソースを `artifacts/` 以下にコピーします）
-- 戻り値：コピー後の `artifacts/` 内でのパス
+- `name`: Alias for the artifact. Can include `/` to create a subdirectory structure.
+- `path`: Path to a file or directory (the source is copied into `artifacts/`)
+- Returns: the path inside `artifacts/` where the file was copied
 
 ```python
-# ファイル1つ
+# Single file
 ctx.log_artifact("weights/final.pt", Path("checkpoints/epoch_10.pt"))
 
-# ディレクトリごと
+# Entire directory
 ctx.log_artifact("outputs/", Path("results/"))
 ```
 
-UIの「Artifacts」タブから一覧・ダウンロードできます。
+Artifacts are listed and downloadable from the "Artifacts" tab in the dashboard.
 
-### 5.4 データセット参照
+### 5.4 Dataset Reference
 
 ```python
 ctx.use_dataset(name: str) -> pathlib.Path
 ```
 
-登録済みデータセット `name` のパスを返します。同時にリネージュ（`uses-dataset` エッジ）を `inputs.jsonl` に記録します。
+Returns the path of the registered dataset `name` and records a `uses-dataset` lineage edge in `inputs.jsonl`.
 
 ```python
 data_dir = ctx.use_dataset("imagenet")
-# data_dir は Path オブジェクト（登録時のパス）
+# data_dir is a Path pointing to the registered location
 ```
 
-### 5.5 他runの成果物参照
+### 5.5 Artifact Reference from Another Run
 
 ```python
 ctx.use_artifact(run_id: str, name: str) -> pathlib.Path
 ```
 
-別runの成果物パスを返します。リネージュ（`consumes-artifact` エッジ）を記録します。
+Returns the path of an artifact from another run and records a `consumes-artifact` lineage edge.
 
 ```python
 weights = ctx.use_artifact("train__20260612-153000__a1b2", "weights/final.pt")
 ```
 
-- `run_id` は `[A-Za-z0-9_.-]+` 形式（パス区切りや `..` は拒否）
-- `name` は `artifacts/` 内への相対パス（`..` によるディレクトリ脱出は拒否）
+- `run_id` must match `[A-Za-z0-9_.-]+` (path separators and `..` are rejected)
+- `name` is a path relative to `artifacts/` (directory traversal via `..` is rejected)
 
 ---
 
-## 6. サーバーの起動
+## 6. Starting the Server
 
-GPUサーバー上で：
+On the GPU server:
 
 ```bash
 mikon serve
-# 既定で http://127.0.0.1:8000 にバインド
+# Binds to http://127.0.0.1:8000 by default
 ```
 
-手元のPCからはSSHポートフォワードで開きます：
+Access the dashboard from your local machine via SSH port forwarding:
 
 ```bash
 ssh -L 8000:localhost:8000 you@gpu-server
-# → ブラウザで http://localhost:8000 を開く
+# → Open http://localhost:8000 in your browser
 ```
 
-ダッシュボードにはジョブ一覧・実行中/完了のラン・GPU状況が表示されます。`watch` で指定したディレクトリ内のファイルを変更すると自動再読み込みします。
+The dashboard shows the job list, active and completed runs, and GPU status. Changes to files in the `watch` directories trigger an automatic reload.
 
 ---
 
-## 7. CLI リファレンス
+## 7. CLI Reference
 
 ### `mikon init`
 
-プロジェクトを初期化します。
+Initialize a mikon project.
 
 ```
 mikon init [--force]
 ```
 
-| オプション | 説明 |
+| Option | Description |
 | --- | --- |
-| `--force` | 既存ファイルを上書きします |
+| `--force` | Overwrite existing files |
 
 ### `mikon serve`
 
-ダッシュボードサーバーを起動します。
+Start the dashboard server.
 
 ```
 mikon serve [--host HOST] [--port PORT] [--token TOKEN]
 ```
 
-| オプション | デフォルト | 説明 |
+| Option | Default | Description |
 | --- | --- | --- |
-| `--host` | `127.0.0.1` | バインドアドレス |
-| `--port` | `8000` | バインドポート |
-| `--token` | なし | Bearer トークン。`localhost` 以外にバインドする場合は必須 |
+| `--host` | `127.0.0.1` | Bind address |
+| `--port` | `8000` | Bind port |
+| `--token` | none | Bearer token. Required when binding to any address other than `localhost`. |
 
 ### `mikon run`
 
-ジョブを起動します（サーバー経由）。
+Launch a job via the server.
 
 ```
 mikon run <JOB> --gpu <GPU_IDS> [--config CONFIG] [--set KEY=VALUE ...] [--force] [--server URL]
 ```
 
-| 引数/オプション | 説明 |
+| Argument / Option | Description |
 | --- | --- |
-| `JOB` | ジョブ名（UIに表示される名前） |
-| `--gpu` | カンマ区切りのGPU ID（例：`nvidia:0`、`nvidia:0,nvidia:1`、`amd:0`） |
-| `--config` | JSON コンフィグファイルのパス |
-| `--set` | `key=value` 形式でコンフィグを上書き（複数指定可）。JSON 値対応・ドット区切りネスト対応 |
-| `--force` | GPU占有中でも強制起動 |
-| `--server` | サーバーURL（デフォルト: `http://127.0.0.1:8000`） |
+| `JOB` | Job name (as shown in the UI) |
+| `--gpu` | Comma-separated GPU IDs (e.g. `nvidia:0`, `nvidia:0,nvidia:1`, `amd:0`) |
+| `--config` | Path to a JSON config file |
+| `--set` | Override a config value as `key=value` (repeatable). Supports JSON values and dotted-key nesting. |
+| `--force` | Launch even if the GPU is occupied |
+| `--server` | Server URL (default: `http://127.0.0.1:8000`) |
 
-**例：**
+**Examples:**
 
 ```bash
-# 最小
+# Minimal
 mikon run train --gpu nvidia:0
 
-# コンフィグファイル指定 + 上書き
+# Config file + overrides
 mikon run train --gpu nvidia:0 --config base.json --set lr=3e-4 --set batch=64
 
-# マルチGPU
+# Multi-GPU
 mikon run train --gpu nvidia:0,nvidia:1
 
-# 占有GPUに強制起動
+# Force launch on an occupied GPU
 mikon run train --gpu nvidia:0 --force
 
-# リモートサーバー
+# Remote server
 mikon run train --gpu nvidia:0 --server http://10.0.0.5:8000
 ```
 
-**`--set` の値変換ルール：**
+**`--set` type coercion:**
 
-- `--set epochs=50` → `{"epochs": 50}`（整数）
-- `--set lr=3e-4` → `{"lr": 0.0003}`（浮動小数点）
-- `--set use_amp=true` → `{"use_amp": true}`（真偽値）
-- `--set tags=["a","b"]` → `{"tags": ["a", "b"]}`（配列）
-- `--set model.depth=50` → `{"model": {"depth": 50}}`（ドット区切りネスト）
-- `--set name=hello` → `{"name": "hello"}`（文字列）
+| Input | Result |
+| --- | --- |
+| `--set epochs=50` | `{"epochs": 50}` (integer) |
+| `--set lr=3e-4` | `{"lr": 0.0003}` (float) |
+| `--set use_amp=true` | `{"use_amp": true}` (boolean) |
+| `--set tags=["a","b"]` | `{"tags": ["a", "b"]}` (array) |
+| `--set model.depth=50` | `{"model": {"depth": 50}}` (nested via dot notation) |
+| `--set name=hello` | `{"name": "hello"}` (string) |
 
 ### `mikon stop`
 
-実行中のジョブを停止します（`SIGTERM` を送信）。
+Stop a running job (sends `SIGTERM`).
 
 ```
 mikon stop <RUN_ID> [--server URL]
@@ -340,56 +344,56 @@ mikon stop <RUN_ID> [--server URL]
 
 ### `mikon doctor`
 
-GPU検出・フレームワーク互換性を診断します。
+Diagnose GPU detection and framework compatibility.
 
 ```
 mikon doctor
 ```
 
-以下を点検してコンソールに出力します：
+Checks and prints:
 
-- GPUベンダー検出（NVIDIA / AMD）
-- インストール済みフレームワーク（torch / jax / tensorflow）とGPUの互換性
-- 「AMD機にCUDA版torchが入っている」などの設定ミスを早期発見
+- GPU vendor detection (NVIDIA / AMD)
+- Compatibility between installed frameworks (torch / jax / tensorflow) and the GPU
+- Misconfigurations such as a CUDA-build of torch installed on an AMD machine
 
 ### `mikon dataset register`
 
-既存パスをデータセットとして登録します。
+Register an existing path as a dataset.
 
 ```
 mikon dataset register <NAME> <PATH> [--description DESC] [--server URL]
 ```
 
-| 引数/オプション | 説明 |
+| Argument / Option | Description |
 | --- | --- |
-| `NAME` | データセット名（`[A-Za-z0-9_.-]+`） |
-| `PATH` | データセットのパス（サーバー上に存在している必要あり） |
-| `--description` | 説明文 |
-| `--server` | サーバーURL |
+| `NAME` | Dataset name (`[A-Za-z0-9_.-]+`) |
+| `PATH` | Path to the dataset (must exist on the server) |
+| `--description` | Optional description |
+| `--server` | Server URL |
 
 ### `mikon dataset build`
 
-データセットビルダーを起動します。
+Launch a dataset builder.
 
 ```
 mikon dataset build <NAME> [--config CONFIG] [--set KEY=VALUE ...] [--gpu GPU_IDS] [--force] [--server URL]
 ```
 
-| 引数/オプション | 説明 |
+| Argument / Option | Description |
 | --- | --- |
-| `NAME` | `@mikon.dataset` でデコレートした関数名 |
-| `--config` | JSON コンフィグファイルのパス |
-| `--set` | コンフィグの上書き |
-| `--gpu` | GPU ID（データ前処理のみなど不要な場合は省略可） |
-| `--force` | GPU占有中でも強制起動 |
+| `NAME` | Name of the function decorated with `@mikon.dataset` |
+| `--config` | Path to a JSON config file |
+| `--set` | Config overrides |
+| `--gpu` | GPU IDs (optional; omit for CPU-only preprocessing) |
+| `--force` | Launch even if the GPU is occupied |
 
 ---
 
-## 8. モジュールシステム
+## 8. Module System
 
-モジュールは、ジョブのコンフィグから差し替えられる**部品**です。前処理・モデル構造・損失関数など、実験ごとに切り替えたいコンポーネントをモジュールとして定義すると、UIで選択フォームが自動生成されます。
+Modules are **swappable components** that can be plugged into a job's config. When you define preprocessing steps, model architectures, or loss functions as modules, the UI generates a selection form automatically.
 
-### 8.1 インターフェースの定義
+### 8.1 Defining an Interface
 
 ```python
 from typing import Protocol, runtime_checkable
@@ -399,9 +403,9 @@ class ModelBlock(Protocol):
     def forward(self, x): ...
 ```
 
-インターフェースは `Protocol` でも通常の基底クラスでも構いません。
+The interface can be a `Protocol` or a regular base class.
 
-### 8.2 モジュールの実装と登録
+### 8.2 Implementing and Registering a Module
 
 ```python
 from mikon import Config
@@ -410,7 +414,7 @@ from pydantic import Field
 class ResNetConfig(Config):
     depth: int = Field(50, ge=18)
 
-@mikon.module(implements=ModelBlock)    # ← 型が合うジョブに差せる
+@mikon.module(implements=ModelBlock)    # Can be used in any job that accepts ModelBlock
 class ResNet:
     def __init__(self, config: ResNetConfig):
         self.config = config
@@ -419,11 +423,11 @@ class ResNet:
         ...
 ```
 
-- `@mikon.module(implements=T)` は自動認識されます（`watch` 対象ディレクトリ内に置いてください）
-- `name=` でモジュール名を上書きできます（省略するとクラス/関数名）
-- クラスと関数のどちらでも登録できます
+- `@mikon.module(implements=T)` is discovered automatically (place the file inside a `watch` directory)
+- Override the name with `name=` (defaults to the class or function name)
+- Both classes and functions can be registered
 
-### 8.3 ジョブからの使用：`ModuleRef[T]`
+### 8.3 Using a Module in a Job: `ModuleRef[T]`
 
 ```python
 import mikon
@@ -431,17 +435,17 @@ from mikon import Config, RunContext
 
 class TrainConfig(Config):
     lr: float = 1e-3
-    model: mikon.ModuleRef[ModelBlock]   # UI に選択フォームが出る
+    model: mikon.ModuleRef[ModelBlock]   # Renders a selection form in the UI
 
 @mikon.job
 def train(config: TrainConfig, ctx: RunContext):
-    # config.model はすでにインスタンス化済みのオブジェクト
+    # config.model is already an instantiated object
     output = config.model.forward(input_data)
 ```
 
-`ModuleRef[T]` フィールドを持つジョブでは、UIの `model` 欄に「`T` を実装しているモジュールの一覧」が出ます。モジュールを選ぶとそのモジュールの Config フォームが下に展開されます。
+For a job with a `ModuleRef[T]` field, the UI shows a list of all modules that implement `T`. Selecting one expands that module's own config form below.
 
-### 8.4 遅延構築：`ModuleFactory[T]`
+### 8.4 Deferred Construction: `ModuleFactory[T]`
 
 ```python
 class TrainConfig(Config):
@@ -449,16 +453,16 @@ class TrainConfig(Config):
 
 @mikon.job
 def train(config: TrainConfig, ctx: RunContext):
-    # 呼び出すときに kwargs を渡せる
+    # Creates a new instance on each call; kwargs are forwarded
     model_a = config.model(seed=1)
     model_b = config.model(seed=2)
 ```
 
-`ModuleFactory[T]` は呼び出しのたびにインスタンスを生成する callable です。実行時引数が必要なケースやデータ並列構成に使います。
+`ModuleFactory[T]` is a callable that creates a new instance each time it is called. Use it when you need runtime arguments or data-parallel setups.
 
-### 8.5 入れ子モジュール
+### 8.5 Nested Modules
 
-モジュール自身も `ModuleRef` / `ModuleFactory` フィールドを持てます。
+Modules can themselves have `ModuleRef` / `ModuleFactory` fields.
 
 ```python
 class PipelineConfig(Config):
@@ -470,11 +474,11 @@ class EncDecPipeline:
     def __init__(self, config: PipelineConfig): ...
 ```
 
-入れ子の最大深さは `mikon.toml` の `[modules] max_nest_depth`（デフォルト: `8`）で制御します。
+The maximum nesting depth is controlled by `[modules] max_nest_depth` in `mikon.toml` (default: `8`).
 
-### 8.6 コンフィグへの直列化形式
+### 8.6 Serialization Format
 
-モジュールフィールドの値は内部的に以下の形式で `config.json` に保存されます：
+Module field values are stored internally in `config.json` as:
 
 ```json
 {
@@ -483,28 +487,28 @@ class EncDecPipeline:
 }
 ```
 
-`__module__` がモジュール名、残りのキーがそのモジュールの Config フィールドです。
+`__module__` holds the module name; the remaining keys are that module's Config fields.
 
 ---
 
-## 9. データセット
+## 9. Datasets
 
-### 9.1 既存パスの登録
+### 9.1 Registering an Existing Path
 
 ```python
-# Python SDK から（サーバー起動前に呼ぶスクリプト等）
+# From Python (e.g. a script run before the server starts)
 import mikon.datasets
-mikon.datasets.register("mnist", path="/data/mnist", description="手書き数字")
+mikon.datasets.register("mnist", path="/data/mnist", description="Handwritten digits")
 ```
 
 ```bash
-# CLI から
-mikon dataset register mnist /data/mnist --description "手書き数字"
+# From the CLI
+mikon dataset register mnist /data/mnist --description "Handwritten digits"
 ```
 
-名前は `[A-Za-z0-9_.-]+` のみ使用可能です。
+Names must match `[A-Za-z0-9_.-]+`.
 
-### 9.2 ビルダーによる作成
+### 9.2 Creating with a Builder
 
 ```python
 from mikon import Config, DatasetContext
@@ -516,56 +520,56 @@ class Cifar10Config(Config):
 
 @mikon.dataset
 def cifar10(config: Cifar10Config, ctx: DatasetContext) -> None:
-    # ダウンロードなどの処理
+    # Download or prepare the data
     download_to(ctx.staging_dir, config.root)
 
-    # 完成したディレクトリを "cifar10" として登録する
+    # Register the finished directory as "cifar10"
     ctx.add_dir(ctx.staging_dir, description="CIFAR-10 dataset")
 ```
 
-ビルダー関数のシグネチャ：
+Builder function signature:
 
 ```python
-def fn(config: <Configサブクラス>, ctx: DatasetContext) -> None
+def fn(config: <Config subclass>, ctx: DatasetContext) -> None
 ```
 
-**`DatasetContext` API：**
+**`DatasetContext` API:**
 
-| メソッド/プロパティ | 説明 |
+| Method / Property | Description |
 | --- | --- |
-| `ctx.staging_dir` | 一時作業ディレクトリ（`pathlib.Path`） |
-| `ctx.dataset_name` | ビルダー名（登録時のデータセット名） |
-| `ctx.add_dir(path, description=None)` | パスをデータセットとしてストアに登録します |
+| `ctx.staging_dir` | Temporary working directory (`pathlib.Path`) |
+| `ctx.dataset_name` | Builder name (the dataset name used for registration) |
+| `ctx.add_dir(path, description=None)` | Register a directory as a dataset in the store |
 
-### 9.3 ジョブからの参照
+### 9.3 Referencing a Dataset from a Job
 
 ```python
 @mikon.job
 def train(config: TrainConfig, ctx: RunContext):
-    data_dir = ctx.use_dataset("mnist")   # Path が返る
-    # data_dir 以下を読む
+    data_dir = ctx.use_dataset("mnist")   # Returns a Path
+    # Read from data_dir
 ```
 
-`use_dataset` は自動でリネージュ（`uses-dataset` エッジ）を記録します。
+`use_dataset` automatically records a `uses-dataset` lineage edge.
 
 ---
 
-## 10. リネージュ
+## 10. Lineage
 
-mikon は以下のエッジを自動で記録します：
+mikon automatically records the following edges:
 
-| エッジ種別 | 記録タイミング |
+| Edge type | Recorded when |
 | --- | --- |
-| `uses-dataset` | `ctx.use_dataset(name)` を呼んだとき |
-| `consumes-artifact` | `ctx.use_artifact(run_id, name)` を呼んだとき |
-| `uses-module` | モジュールを含む Config でジョブを起動したとき |
-| `produces-dataset` | `ctx.add_dir(...)` でデータセットビルダーが完了したとき |
+| `uses-dataset` | `ctx.use_dataset(name)` is called |
+| `consumes-artifact` | `ctx.use_artifact(run_id, name)` is called |
+| `uses-module` | A job is launched with a Config containing module fields |
+| `produces-dataset` | A dataset builder completes via `ctx.add_dir(...)` |
 
-UIの「Lineage」ビューでは、あるランを中心に上流（親）・下流（子）方向を指定深さまでグラフとして表示します。モジュールリンクはデフォルト折り畳みで、必要なときだけ展開できます。
+The "Lineage" view in the UI shows a graph centered on a selected run, traversing upstream (parents) and downstream (children) to a configurable depth. Module links are collapsed by default and can be expanded on demand.
 
-**手動リンク**（成果物を介さない「参考にした」関係）はUIから張ることもできます。
+**Manual links** (e.g. "I looked at this run before choosing these hyperparameters") can be added from the UI without requiring an artifact connection.
 
-**APIでの取得：**
+**API:**
 
 ```
 GET /api/runs/{run_id}/lineage?direction=both&depth=2&include_modules=false
@@ -573,191 +577,192 @@ GET /api/runs/{run_id}/lineage?direction=both&depth=2&include_modules=false
 
 ---
 
-## 11. 整理機能（タグ・グループ・スター・削除）
+## 11. Organization: Tags, Groups, Stars, and Deletion
 
-各ランにはアノテーションを付けられます。**起動時**（UI のジョブ起動フォームまたは `CreateRunRequest.annotations`）に設定することも、**起動後**（UI の Overview タブまたは `PATCH /api/runs/{run_id}`）に編集することもできます。
+Annotations can be set at **launch time** (via the UI job launch form or `CreateRunRequest.annotations`) or edited **after the fact** (via the UI Overview tab or `PATCH /api/runs/{run_id}`).
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 | --- | --- | --- |
-| `title` | `str \| null` | 表示名。省略するとラン ID が表示名として扱われる |
-| `memo` | `str \| null` | メモ・ノート |
-| `tags` | `list[str]` | 自由タグ（複数） |
-| `star` | `bool` | スター（お気に入りフラグ） |
-| `group_ids` | `list[str]` | 所属グループの ID 一覧 |
+| `title` | `str \| null` | Display name. Shown as the primary label in lists and the detail header. Defaults to run ID when unset. |
+| `memo` | `str \| null` | Free-text note |
+| `tags` | `list[str]` | Arbitrary tags (multiple allowed) |
+| `star` | `bool` | Starred / favourited |
+| `group_ids` | `list[str]` | List of group IDs this run belongs to |
 
-`title` はラン一覧・詳細ヘッダでの主表示として使われます。未設定の場合はラン ID が代わりに表示されます。
+**Groups** are first-class containers for collecting and comparing multiple runs side by side.
 
-**グループ** は独立した管理対象で、複数のランをまとめて比較・整理するための入れ物です。グループ単位でランを並べて比較できます。
-
-`GET /api/runs` でのフィルタリング：
+Filtering in `GET /api/runs`:
 
 ```
 GET /api/runs?tag=baseline&star=true&group=<group_id>&job=train&status=completed
 ```
 
-### ランの削除
+### Deleting Runs
 
-UIのラン詳細画面の削除ボタン、またはラン一覧の各行・一括削除から実行できます。必ず確認ダイアログが表示されます。実行中（`status=running`）のランは削除できません。
+Runs can be deleted from the run detail page or via the bulk-delete action in the runs list. A confirmation dialog is always shown. Runs with `status=running` cannot be deleted.
 
 ```
 DELETE /api/runs/{run_id}    # 204 No Content
 ```
 
-削除するとストア内のディレクトリ（メタ・ログ・成果物を含む）がすべて消去されます。**この操作は取り消せません。**
+Deleting a run permanently removes its entire store directory — metadata, logs, metrics, and artifacts. **This operation cannot be undone.**
 
 ---
 
-## 12. ドキュメント閲覧
+## 12. Document Viewer
 
-プロジェクトの `docs/` ディレクトリ（`mikon.toml` の `[docs] root` で変更可能）に配置した Markdown / Typst ファイルをダッシュボードの `Docs` タブで閲覧できます。
+Markdown, Typst, and TypMark files placed in the project's `docs/` directory (configurable via `[docs] root` in `mikon.toml`) are viewable in the "Docs" tab of the dashboard.
 
 ```
 docs/
   index.md
   assets/
-    plot.png          # 画像ファイル（.avif/.gif/.jpeg/.jpg/.png/.webp）
+    plot.png          # Image files (.avif / .gif / .jpeg / .jpg / .png / .webp)
   experiments/
     notes.md
   reports/
-    summary.typ       # Typst ドキュメント
+    summary.typ       # Typst document
+    report.tmd        # TypMark document
 ```
 
-**制約と動作：**
+**Behavior and constraints:**
 
-- Markdown は サーバー側でHTMLへレンダリングされ、危険な HTML は sanitize されます
-- Markdown 内の相対画像（`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.avif`）は `docs/assets/` 配下のものだけ表示されます
-- 外部URL画像や `docs/` 外への参照は表示されません
-- Typst は PATH 上に `typst` CLI がある場合のみ SVG へコンパイルされます。CLI がない・コンパイル失敗・SVG出力上限超過（5 MiB）の場合はソース表示に縮退し、理由が画面に出ます
-- ファイルサイズ上限：ドキュメント 2 MiB、アセット 10 MiB
-- 隠しファイル（`.` で始まるファイル・ディレクトリ）はツリーに表示されません
-- シンボリックリンクは `docs/` 外への参照を拒否します（循環リンクも検出）
-- ドキュメント編集・全文検索・PDF出力は対象外です
+- Markdown is rendered to HTML server-side; dangerous HTML is sanitized.
+- Relative images in Markdown (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.avif`) are only displayed if they reside under `docs/assets/`. External image URLs and references outside `docs/` are not shown.
+- Typst documents are compiled to SVG only if the `typst` CLI is on `PATH`. If the CLI is absent, compilation fails, or SVG output exceeds 5 MiB, the document degrades to source display with a reason shown in the UI.
+- TypMark documents (`.tmd`) are rendered to HTML by `typmark-cli --render` if the CLI is on `PATH`. The rendered output is displayed in a sandboxed iframe. If the CLI is absent or rendering fails, the document degrades to source display.
+- Documents in all formats hot-reload automatically in the browser when the source file is saved — no manual refresh needed.
+- File size limits: documents 2 MiB, assets 10 MiB.
+- Hidden files and directories (names beginning with `.`) are excluded from the tree.
+- Symbolic links that point outside `docs/` are rejected (circular symlinks are also detected).
+- Document editing, full-text search, and PDF export are out of scope.
 
 ---
 
-## 13. mikon.toml リファレンス
+## 13. mikon.toml Reference
 
 ```toml
 [mikon]
-# ジョブを自動スキャンするディレクトリのリスト（相対パス or 絶対パス）
+# Directories to auto-scan for jobs (relative or absolute paths)
 watch = ["src"]
 
-# run・メトリクス・成果物の保存先（相対パス）
+# Storage root for runs, metrics, and artifacts (relative path)
 store = ".mikon"
 
 [gpu]
-# このメモリ（MiB）を超えると「占有中」とみなす（NVIDIA: nvml、AMD: amdsmi/CLI）
+# Memory usage (MiB) above which a GPU is considered occupied
+# (NVIDIA: nvml; AMD: amdsmi or CLI)
 occupancy_mem_mb = 500
 
-# この使用率（%）を超えると「占有中」とみなす
+# Utilization (%) above which a GPU is considered occupied
 occupancy_util = 5
 
 [modules]
-# ModuleRef / ModuleFactory の入れ子の最大深さ（循環防止）
+# Maximum nesting depth for ModuleRef / ModuleFactory (prevents cycles)
 max_nest_depth = 8
 
 [docs]
-# ダッシュボードの Docs タブで表示するドキュメントルート（相対パス）
+# Document root shown in the dashboard Docs tab (relative path)
 root = "docs"
 ```
 
-すべてのキーはオプションです。`mikon.toml` が存在しない場合はデフォルト値が使われます。
+All keys are optional. Default values are used when `mikon.toml` does not exist.
 
 ---
 
-## 14. ストアのレイアウト
+## 14. Store Layout
 
-ストアのデフォルト位置は `.mikon/`（`mikon.toml` の `store` で変更可能）。ランタイムは環境変数 `MIKON_STORE` で上書きできます。
+The store defaults to `.mikon/` (configurable via `store` in `mikon.toml`). The `MIKON_STORE` environment variable overrides it at runtime.
 
 ```
 .mikon/
   runs/
     train__20260612-153000__a1b2/    # run_id = {job}__{YYYYMMDD-HHMMSS}__{4hex}
-      meta.json          # job名、開始時刻、GPUs、tags、star、group_id など
-      status.json        # 現在のステータス（running/completed/failed/stopped/unknown）
-      config.json        # 起動時のコンフィグ（確定値）
-      metrics.jsonl      # log_metric の記録（1行1レコード）
-      artifacts.jsonl    # log_artifact の記録（1行1レコード）
-      inputs.jsonl       # use_dataset / use_artifact / uses-module の記録
-      heartbeat          # ランナーが2秒ごとに更新（30秒以上更新なし → unknown）
+      meta.json          # job name, start time, GPUs, tags, star, group_id, etc.
+      status.json        # current status (running/completed/failed/stopped/unknown)
+      config.json        # resolved config at launch time
+      metrics.jsonl      # log_metric records (one JSON object per line)
+      artifacts.jsonl    # log_artifact records (one JSON object per line)
+      inputs.jsonl       # use_dataset / use_artifact / uses-module records
+      heartbeat          # updated by the runner every 2 s (stale >30 s → unknown)
       logs/
         stdout.log
         stderr.log
       artifacts/
-        model.pt         # log_artifact でコピーされたファイル
+        model.pt         # file copied by log_artifact
   datasets/
     mnist/
       meta.json          # name, path, description, source, created_at
-  configs/               # 保存済みコンフィグ（PUT /api/configs/{name}）
-  groups/                # グループ（POST /api/groups）
-  links/                 # 手動リンク（POST /api/links）
+  configs/               # saved configs (PUT /api/configs/{name})
+  groups/                # groups (POST /api/groups)
+  links/                 # manual links (POST /api/links)
 ```
 
-**ラン ID のフォーマット：** `{job}__{YYYYMMDD-HHMMSS}__{4hex}`（例：`train__20260612-153000__a1b2`）
+**Run ID format:** `{job}__{YYYYMMDD-HHMMSS}__{4hex}` (example: `train__20260612-153000__a1b2`)
 
-ファイルはすべてテキストベースで、ダッシュボードなしに直接読めます。ダッシュボードは「ファイルの表示レイヤー」であり、ジョブはダッシュボードと独立したプロセスとして動作します。
+All files are plain text and can be read directly without the dashboard. The dashboard is a display layer over these files; jobs run as independent processes and survive a dashboard restart.
 
 ---
 
-## 15. GPU 管理
+## 15. GPU Management
 
-### GPU ID の形式
+### GPU ID Format
 
-mikon では GPU を `vendor:index` の統一形式で指定します：
+mikon uses a unified `vendor:index` format for GPU identifiers:
 
-| 形式 | 説明 |
+| Format | Description |
 | --- | --- |
-| `nvidia:0` | NVIDIA GPU の index 0 |
-| `nvidia:1` | NVIDIA GPU の index 1 |
-| `amd:0` | AMD GPU の index 0 |
+| `nvidia:0` | NVIDIA GPU at index 0 |
+| `nvidia:1` | NVIDIA GPU at index 1 |
+| `amd:0` | AMD GPU at index 0 |
 
-**制約：1つのジョブでは同じベンダーの GPU だけを選択できます。** `nvidia:0,amd:0` のように複数ベンダーを混在させると `422 gpus-mixed-vendor` エラーになります。
+**Constraint: all GPUs in a single job must be from the same vendor.** Mixing vendors (e.g. `nvidia:0,amd:0`) returns `422 gpus-mixed-vendor`.
 
-### 環境変数の自動設定
+### Automatic Environment Variables
 
-ジョブ起動時、選択した GPU のベンダーに応じて以下の環境変数が自動設定されます：
+When a job is launched, mikon sets the following environment variable based on the selected GPU vendor:
 
-| ベンダー | 環境変数 |
+| Vendor | Environment variable |
 | --- | --- |
 | NVIDIA | `CUDA_VISIBLE_DEVICES=0,1,...` |
 | AMD | `ROCR_VISIBLE_DEVICES=0,1,...` |
 
-コード内でGPUを選択する必要はありません。
+You do not need to select GPUs in your code.
 
-### GPU占有チェック
+### Occupancy Check
 
-既定では、`occupancy_mem_mb` または `occupancy_util` を超えるGPUへの起動はブロックされます（`409 gpu-occupied`）。`--force` で上書きできます。
+By default, launching a job on a GPU that exceeds `occupancy_mem_mb` or `occupancy_util` is blocked (`409 gpu-occupied`). Pass `--force` to override.
 
-### 診断
+### Diagnostics
 
 ```bash
 mikon doctor
 ```
 
-GPU が正しく認識されているか、フレームワークとの互換性（例：AMD機でCUDA版torchが入っていないか）を点検します。
+Checks whether GPUs are correctly detected and whether installed frameworks are compatible (e.g. detects a CUDA build of torch on an AMD machine).
 
 ---
 
-## 16. 認証・アクセス制御
+## 16. Authentication and Access Control
 
-| バインド先 | 認証 |
+| Bind address | Authentication |
 | --- | --- |
-| `127.0.0.1`（デフォルト） | なし（SSH ポートフォワード推奨） |
-| `0.0.0.0` 等の外部 | `--token <TOKEN>` 必須 |
+| `127.0.0.1` (default) | None (SSH port forwarding recommended) |
+| External (`0.0.0.0`, etc.) | `--token <TOKEN>` required |
 
-外部バインド時は全 `/api` エンドポイントで `Authorization: Bearer <token>` ヘッダが必要です。
+When bound to an external address, all `/api` endpoints require an `Authorization: Bearer <token>` header.
 
 ```bash
 mikon serve --host 0.0.0.0 --port 8000 --token mysecrettoken
 ```
 
-CLIコマンドは現時点でトークンを引数として渡す方法がないため、外部サーバーへCLIで接続する場合は直接 `httpx` / `curl` 等を使うか、ローカルでSSHフォワードを使ってください。
+The current CLI does not support passing a token as an argument, so connecting to an external server from the CLI requires using `httpx` / `curl` directly, or routing through a local SSH forward.
 
 ---
 
-## 17. API エラーモデル
+## 17. API Error Model
 
-mikon は [RFC 9457 Problem Details](https://www.rfc-editor.org/rfc/rfc9457) 形式（`application/problem+json`）でエラーを返します。
+mikon returns errors in [RFC 9457 Problem Details](https://www.rfc-editor.org/rfc/rfc9457) format (`application/problem+json`).
 
 ```json
 {
@@ -771,28 +776,28 @@ mikon は [RFC 9457 Problem Details](https://www.rfc-editor.org/rfc/rfc9457) 形
 }
 ```
 
-主要なエラー type：
+All error types:
 
-| type | status | 意味 |
+| type | status | Meaning |
 | --- | --- | --- |
-| `/problems/job-not-found` | 404 | 未知のジョブ名 |
-| `/problems/run-not-found` | 404 | 未知のラン ID |
-| `/problems/gpu-occupied` | 409 | 占有GPU への非force起動 |
-| `/problems/gpus-mixed-vendor` | 422 | 複数ベンダーのGPUを同一ジョブに指定 |
-| `/problems/gpu-not-found` | 422 | 指定GPUが存在しない |
-| `/problems/run-not-stoppable` | 409 | 終端済みランへの停止要求 |
-| `/problems/config-validation-failed` | 422 | Config がスキーマ違反 |
-| `/problems/config-name-conflict` | 409 | config名が別ジョブに帰属済み |
-| `/problems/registry-stale` | 503 | ディスカバリの import 失敗中 |
-| `/problems/dataset-not-found` | 404 | 未知のデータセット名 |
-| `/problems/dataset-builder-not-found` | 404 | 未知のビルダー名 |
-| `/problems/dataset-validation-failed` | 422 | データセット登録値が不正 |
-| `/problems/invalid-name` | 422 | 名前に不正文字 |
-| `/problems/group-not-found` | 404 | 未知のグループ ID |
-| `/problems/group-validation-failed` | 422 | グループ名/説明が不正 |
-| `/problems/link-not-found` | 404 | 未知のリンク ID |
-| `/problems/link-validation-failed` | 422 | manual link の参照先が不正 |
-| `/problems/run-start-failed` | 500 | サブプロセス起動失敗 |
-| `/problems/doc-not-found` | 404 | 未知の docs パス |
-| `/problems/doc-unsupported` | 415/422 | 未対応拡張子または docs root 不正 |
-| `/problems/doc-too-large` | 413 | ドキュメント/アセットがサイズ上限超過 |
+| `/problems/job-not-found` | 404 | Unknown job name |
+| `/problems/run-not-found` | 404 | Unknown run ID |
+| `/problems/gpu-occupied` | 409 | Non-force launch on an occupied GPU |
+| `/problems/gpus-mixed-vendor` | 422 | Multiple GPU vendors specified for one job |
+| `/problems/gpu-not-found` | 422 | Specified GPU does not exist |
+| `/problems/run-not-stoppable` | 409 | Stop requested on an already-terminal run |
+| `/problems/config-validation-failed` | 422 | Config violates its schema |
+| `/problems/config-name-conflict` | 409 | Config name already belongs to a different job |
+| `/problems/registry-stale` | 503 | Discovery import is failing |
+| `/problems/dataset-not-found` | 404 | Unknown dataset name |
+| `/problems/dataset-builder-not-found` | 404 | Unknown dataset builder name |
+| `/problems/dataset-validation-failed` | 422 | Invalid dataset registration values |
+| `/problems/invalid-name` | 422 | Name contains invalid characters |
+| `/problems/group-not-found` | 404 | Unknown group ID |
+| `/problems/group-validation-failed` | 422 | Invalid group name or description |
+| `/problems/link-not-found` | 404 | Unknown link ID |
+| `/problems/link-validation-failed` | 422 | Manual link references an invalid node ID |
+| `/problems/run-start-failed` | 500 | Subprocess launch failed |
+| `/problems/doc-not-found` | 404 | Unknown docs path |
+| `/problems/doc-unsupported` | 415/422 | Unsupported extension or invalid docs root |
+| `/problems/doc-too-large` | 413 | Document or asset exceeds the size limit |

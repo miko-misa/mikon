@@ -1,42 +1,45 @@
 # mikon
 
-GPUサーバー上のAI開発（学習・評価ジョブ）をブラウザで管理するセルフホスト型ツール。
+> 日本語版: [README-ja.md](README-ja.md)
 
-**あなたは普段どおりPythonでコードを書き、関数にデコレータを付けるだけ。** ツールが自動でジョブを認識し、コンフィグのフォームを生成し、GPUを割り当てて起動し、メトリクス・ログ・成果物をリアルタイムで表示します。
+A self-hosted tool for managing AI development (training and evaluation jobs) on GPU servers from a browser.
 
----
-
-## 特徴
-
-- **デコレータだけで認識** — `@mikon.job` を付けるだけ。登録作業やコード変更は不要
-- **コンフィグUIの自動生成** — `class Config(mikon.Config)` の Pydantic フィールドがそのままフォームになる（スライダ・セレクト・チェックボックスなど）
-- **NVIDIA / AMD 両対応** — `nvidia:0` / `amd:0` の統一形式でGPUを指定。`CUDA_VISIBLE_DEVICES` / `ROCR_VISIBLE_DEVICES` を自動設定
-- **ライブモニタリング** — メトリクスチャート・ログストリームが数秒更新（SSE）
-- **成果物管理** — `ctx.log_artifact()` でブラウザからダウンロード可能
-- **リネージュ追跡** — `ctx.use_dataset()` / `ctx.use_artifact()` で上流/下流グラフを自動構築
-- **モジュールシステム** — 差し替え可能なコンポーネントを `@mikon.module` で登録、UIでモジュール選択フォームが自動生成
-- **データセット管理** — 既存パスの登録、ビルダーによる自動作成
-- **ドキュメント閲覧** — `docs/` に置いた Markdown / Typst をダッシュボードで表示
-- **ファイルベース永続化** — SQLデータベース不要。すべて `.mikon/` 以下のテキストファイルに保存
-- **独立プロセス** — ダッシュボードを再起動してもジョブは生き続ける
+**Write Python the way you normally would, and just add a decorator to your functions.** mikon automatically discovers your jobs, generates config forms, allocates GPUs, launches runs, and displays metrics, logs, and artifacts in real time.
 
 ---
 
-## 要件
+## Features
+
+- **Decorator-only discovery** — Just add `@mikon.job`. No registration step, no code changes required.
+- **Auto-generated config UI** — Pydantic fields on `class Config(mikon.Config)` become form widgets automatically (sliders, selects, checkboxes, etc.)
+- **NVIDIA and AMD support** — Specify GPUs in unified `nvidia:0` / `amd:0` format. `CUDA_VISIBLE_DEVICES` / `ROCR_VISIBLE_DEVICES` are set automatically.
+- **Live monitoring** — Metric charts and log streams update every few seconds via SSE.
+- **Artifact management** — Call `ctx.log_artifact()` to make files downloadable from the browser.
+- **Lineage tracking** — `ctx.use_dataset()` / `ctx.use_artifact()` automatically build an upstream/downstream graph.
+- **Module system** — Register swappable components with `@mikon.module`; the UI generates a module-selection form automatically.
+- **Dataset management** — Register existing paths or create datasets with a builder function.
+- **Document viewer** — Markdown, Typst, and TypMark files placed in `docs/` are viewable in the dashboard.
+- **File-based persistence** — No SQL database required. Everything is stored as text files under `.mikon/`.
+- **Independent processes** — Jobs keep running even if the dashboard is restarted.
+
+---
+
+## Requirements
 
 - Python 3.11+
-- GPUサーバー（NVIDIA ドライバ or AMD ROCm 導入済み）
-- Typst ドキュメントを使う場合は `typst` CLI（任意）
+- GPU server with NVIDIA drivers or AMD ROCm installed
+- `typst` CLI (optional, for Typst document rendering)
+- `typmark-cli` CLI (optional, for TypMark document rendering)
 
 ---
 
-## クイックスタート
+## Quick Start
 
 ```bash
-# インストール
-uv add mikon   # または pip install mikon
+# Install
+uv add mikon   # or: pip install mikon
 
-# プロジェクト初期化
+# Initialize project
 mikon init
 ```
 
@@ -60,36 +63,36 @@ def train(config: TrainConfig, ctx: RunContext) -> None:
 ```
 
 ```bash
-# サーバー起動（GPUサーバー上で）
+# Start the server on the GPU machine
 mikon serve
 
-# CLIから起動
+# Launch a job from the CLI
 mikon run train --gpu nvidia:0
 
-# 手元PCからはSSHポートフォワードで
+# Access the dashboard from your local machine via SSH port forwarding
 ssh -L 8000:localhost:8000 you@gpu-server
-# → ブラウザで http://localhost:8000
+# → Open http://localhost:8000 in your browser
 ```
 
 ---
 
-## インストール
+## Installation
 
 ```bash
-uv add mikon   # 推奨
+uv add mikon   # recommended
 pip install mikon
 ```
 
-依存ライブラリ（`pynvml`・`psutil`・`watchfiles`・`fastapi` など）は自動でインストールされます。
+Dependencies (`pynvml`, `psutil`, `watchfiles`, `fastapi`, etc.) are installed automatically.
 
 ---
 
-## ドキュメント
+## Documentation
 
-詳細な使い方・SDK リファレンス・CLI オプション・API エラーモデルは [USAGE.md](USAGE.md) を参照してください。
+For the full usage guide, SDK reference, CLI options, and API error model, see [USAGE.md](USAGE.md).
 
 ---
 
-## ライセンス
+## License
 
 MIT
