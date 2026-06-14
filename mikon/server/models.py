@@ -183,7 +183,7 @@ class DocNode(BaseModel):
     name: str
     path: str
     type: Literal["dir", "file"]
-    format: Literal["markdown", "typst"] | None = None
+    format: Literal["markdown", "typst", "typmark"] | None = None
     mtime: datetime | None = None
     size: int | None = None
     children: list["DocNode"] = Field(default_factory=list)
@@ -198,7 +198,7 @@ class DocTree(BaseModel):
 class DocDocument(BaseModel):
     path: str
     title: str
-    format: Literal["markdown", "typst"]
+    format: Literal["markdown", "typst", "typmark"]
     rendered_kind: Literal["html", "svg", "source"]
     content: str
     source: str

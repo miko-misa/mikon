@@ -140,7 +140,7 @@ export type DocNode = {
   name: string;
   path: string;
   type: "dir" | "file";
-  format?: "markdown" | "typst" | null;
+  format?: "markdown" | "typst" | "typmark" | null;
   mtime?: string | null;
   size?: number | null;
   children: DocNode[];
@@ -151,7 +151,7 @@ export type DocTree = { root: string; exists: boolean; nodes: DocNode[] };
 export type DocDocument = {
   path: string;
   title: string;
-  format: "markdown" | "typst";
+  format: "markdown" | "typst" | "typmark";
   rendered_kind: "html" | "svg" | "source";
   content: string;
   source: string;

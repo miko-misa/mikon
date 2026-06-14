@@ -341,6 +341,23 @@ def test_docs_tree_returns_empty_when_root_is_missing(tmp_path: Path) -> None:
     assert response.json()["nodes"] == []
 
 
+def test_spa_docs_route_does_not_collide_with_swagger(tmp_path: Path) -> None:
+    project = make_project(tmp_path)
+    app = create_app(project_root=project)
+
+    with TestClient(app) as client:
+        docs_page = client.get("/docs")
+        swagger = client.get("/api/docs-ui")
+        openapi = client.get("/api/openapi.json")
+
+    assert docs_page.status_code == 200
+    assert "Swagger UI" not in docs_page.text
+    assert "swagger-ui" not in docs_page.text.lower()
+    assert swagger.status_code == 200
+    assert "Swagger UI" in swagger.text
+    assert openapi.status_code == 200
+
+
 def test_docs_tree_returns_empty_when_root_has_no_documents(tmp_path: Path) -> None:
     project = make_project(tmp_path)
     (project / "docs").mkdir()
@@ -483,7 +500,22 @@ def test_docs_markdown_rendering_sanitizes_html_and_supports_tables_and_code(tmp
 | - | - |
 | 1 | 2 |
 
+- [x] completed
+- [ ] pending
+
+~~old~~ ==marked== ^^inserted^^
+
+??? note "Details title"
+    Hidden body.
+
+Inline math $a^2 + b^2 = c^2$.
+
+$$
+\\int_0^1 x^2 dx = \\frac{1}{3}
+$$
+
 ```python
+import jax.numpy as jnp
 print("ok")
 ```
 """,
@@ -500,6 +532,17 @@ print("ok")
     assert data["rendered_kind"] == "html"
     assert "<script" not in data["content"]
     assert "<table>" in data["content"]
+    assert 'class="task-list"' in data["content"]
+    assert 'type="checkbox"' in data["content"]
+    assert "<del>old</del>" in data["content"]
+    assert "<mark>marked</mark>" in data["content"]
+    assert "<ins>inserted</ins>" in data["content"]
+    assert '<details class="note">' in data["content"]
+    assert '<span class="arithmatex">' in data["content"]
+    assert '<div class="arithmatex">' in data["content"]
+    assert '<div class="highlight">' in data["content"]
+    assert 'class="kn"' in data["content"]
+    assert "jax.numpy" in data["content"]
     assert "print" in data["content"]
     assert data["title"] == "Title"
 

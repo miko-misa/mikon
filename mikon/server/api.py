@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Literal
+
+from watchfiles import awatch
 
 from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import FileResponse, PlainTextResponse, Response as FastAPIResponse
@@ -169,6 +172,10 @@ def create_api_router() -> APIRouter:
     @router.get("/docs")
     def get_docs_tree(request: Request):
         return DocsService(request.app.state.settings).tree()
+
+    @router.get("/docs/stream")
+    async def stream_docs(request: Request):
+        return EventSourceResponse(_docs_stream(request))
 
     @router.get("/docs/{doc_path:path}")
     def get_doc(doc_path: str, request: Request):
@@ -399,6 +406,30 @@ async def _resources_stream(request: Request):
         snapshot = resources.snapshot()
         yield {"event": "resources", "data": snapshot.model_dump_json()}
         await asyncio.sleep(2)
+
+
+async def _docs_stream(request: Request):
+    docs_root = DocsService(request.app.state.settings).root
+    doc_suffixes = set(DOC_EXTENSIONS.keys())
+
+    if not docs_root.exists():
+        while not await request.is_disconnected():
+            await asyncio.sleep(10)
+        return
+
+    try:
+        async for changes in awatch(docs_root):
+            if await request.is_disconnected():
+                break
+            relevant = [
+                str(Path(p).relative_to(docs_root).as_posix())
+                for _, p in changes
+                if Path(p).suffix.lower() in doc_suffixes
+            ]
+            if relevant:
+                yield {"event": "change", "data": json.dumps(relevant)}
+    except asyncio.CancelledError:
+        pass
 
 
 def _last_event_id(request: Request) -> int:

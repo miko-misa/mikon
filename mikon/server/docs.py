@@ -23,10 +23,12 @@ from mikon.server.settings import Settings
 MAX_DOC_BYTES = 2 * 1024 * 1024
 MAX_DOC_ASSET_BYTES = 10 * 1024 * 1024
 MAX_TYPST_SVG_BYTES = 5 * 1024 * 1024
+MAX_TYPMARK_HTML_BYTES = 5 * 1024 * 1024
 DOC_EXTENSIONS = {
     ".md": "markdown",
     ".markdown": "markdown",
     ".typ": "typst",
+    ".tmd": "typmark",
 }
 ASSET_EXTENSIONS = {
     ".avif": "image/avif",
@@ -57,12 +59,16 @@ MARKDOWN_TAGS = {
     "h6",
     "hr",
     "img",
+    "input",
+    "ins",
     "li",
+    "mark",
     "ol",
     "p",
     "pre",
     "span",
     "strong",
+    "sub",
     "summary",
     "sup",
     "table",
@@ -74,12 +80,21 @@ MARKDOWN_TAGS = {
     "ul",
 }
 MARKDOWN_ATTRIBUTES = {
-    "*": ["id", "title"],
-    "a": ["href", "title"],
+    "*": ["id", "title", "class"],
+    "a": ["href", "title", "class"],
+    "details": ["class", "open"],
+    "div": ["class"],
     "img": ["src", "alt", "title"],
-    "code": ["class"],
+    "input": ["type", "checked", "disabled", "class"],
+    "li": ["class"],
+    "ol": ["class"],
+    "p": ["class"],
+    "pre": ["class"],
+    "span": ["class"],
+    "summary": ["class"],
     "th": ["align"],
     "td": ["align"],
+    "ul": ["class"],
 }
 
 
@@ -121,6 +136,8 @@ class DocsService:
             content = self._render_markdown(doc_path, source)
             rendered_kind = "html"
             diagnostics: list[str] = []
+        elif fmt == "typmark":
+            content, rendered_kind, diagnostics = self._render_typmark(doc_path, source)
         else:
             content, rendered_kind, diagnostics = self._render_typst(doc_path, source)
 
@@ -269,9 +286,9 @@ class DocsService:
             )
         return candidate
 
-    def _format_for(self, path: Path) -> Literal["markdown", "typst"]:
+    def _format_for(self, path: Path) -> Literal["markdown", "typst", "typmark"]:
         fmt = DOC_EXTENSIONS.get(path.suffix.lower())
-        if fmt not in {"markdown", "typst"}:
+        if fmt not in {"markdown", "typst", "typmark"}:
             raise ProblemException(
                 type="/problems/doc-unsupported",
                 title="Unsupported document",
@@ -325,11 +342,72 @@ class DocsService:
                 ]
             return output.read_text(encoding="utf-8"), "svg", []
 
+    def _render_typmark(
+        self, path: Path, source: str
+    ) -> tuple[str, Literal["html", "source"], list[str]]:
+        executable = shutil.which("typmark-cli")
+        if not executable:
+            return source, "source", ["typmark-cli was not found on PATH; showing source."]
+        try:
+            completed = subprocess.run(
+                [executable, "--render", str(path)],
+                cwd=self.root,
+                text=True,
+                capture_output=True,
+                timeout=15,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return source, "source", ["typmark-cli timed out after 15 seconds; showing source."]
+        except OSError as exc:
+            return source, "source", [f"typmark-cli failed to start: {exc}; showing source."]
+        if completed.returncode != 0:
+            message = (completed.stderr or completed.stdout or "typmark-cli failed").strip()
+            return source, "source", [message[:4000]]
+        html = completed.stdout
+        if len(html.encode()) > MAX_TYPMARK_HTML_BYTES:
+            return source, "source", [
+                f"typmark HTML output exceeded {MAX_TYPMARK_HTML_BYTES} bytes; showing source."
+            ]
+        return html, "html", []
+
 
 def _render_markdown(source: str, doc_path: str, asset_allowed: Callable[[str], bool]) -> str:
     raw_html = markdown_lib.markdown(
         source,
-        extensions=["fenced_code", "tables", "toc", _DocsImageExtension(doc_path, asset_allowed)],
+        extensions=[
+            "extra",
+            "toc",
+            "sane_lists",
+            "pymdownx.superfences",
+            "pymdownx.highlight",
+            "pymdownx.inlinehilite",
+            "pymdownx.arithmatex",
+            "pymdownx.tasklist",
+            "pymdownx.tilde",
+            "pymdownx.caret",
+            "pymdownx.mark",
+            "pymdownx.details",
+            _DocsImageExtension(doc_path, asset_allowed),
+        ],
+        extension_configs={
+            "pymdownx.highlight": {
+                "guess_lang": False,
+                "linenums": False,
+                "noclasses": False,
+                "pygments_style": "default",
+                "use_pygments": True,
+            },
+            "pymdownx.inlinehilite": {
+                "style_plain_text": False,
+            },
+            "pymdownx.arithmatex": {
+                "generic": True,
+            },
+            "pymdownx.tasklist": {
+                "custom_checkbox": True,
+            },
+        },
         output_format="html5",
     )
     return bleach.clean(
@@ -345,7 +423,7 @@ def _title_for(path: Path, source: str) -> str:
     suffix = path.suffix.lower()
     for line in source.splitlines():
         stripped = line.strip()
-        if suffix in {".md", ".markdown"} and stripped.startswith("# "):
+        if suffix in {".md", ".markdown", ".tmd"} and stripped.startswith("# "):
             return stripped[2:].strip() or path.stem
         if suffix == ".typ" and stripped.startswith("= "):
             return stripped[2:].strip() or path.stem
@@ -415,6 +493,10 @@ def _asset_url_for_doc_image(
 
 
 def _allow_markdown_attribute(tag: str, name: str, value: str) -> bool:
+    if tag == "input":
+        if name == "type":
+            return value == "checkbox"
+        return name in {"checked", "disabled", "class"}
     if name in MARKDOWN_ATTRIBUTES.get("*", []):
         return True
     if tag == "img":
