@@ -19,12 +19,14 @@
 9. [Datasets](#9-datasets)
 10. [Lineage](#10-lineage)
 11. [Organization: Tags, Groups, and Stars](#11-organization-tags-groups-and-stars)
-12. [Document Viewer](#12-document-viewer)
-13. [mikon.toml Reference](#13-mikontoml-reference)
-14. [Store Layout](#14-store-layout)
-15. [GPU Management](#15-gpu-management)
-16. [Authentication and Access Control](#16-authentication-and-access-control)
-17. [API Error Model](#17-api-error-model)
+12. [Saved Configs](#12-saved-configs)
+13. [Run Comparison](#13-run-comparison)
+14. [Document Viewer](#14-document-viewer)
+15. [mikon.toml Reference](#15-mikontoml-reference)
+16. [Store Layout](#16-store-layout)
+17. [GPU Management](#17-gpu-management)
+18. [Authentication and Access Control](#18-authentication-and-access-control)
+19. [API Error Model](#19-api-error-model)
 
 ---
 
@@ -575,11 +577,48 @@ The "Lineage" view in the UI shows a graph centered on a selected run, traversin
 GET /api/runs/{run_id}/lineage?direction=both&depth=2&include_modules=false
 ```
 
+| Parameter | Values | Default | Description |
+| --- | --- | --- | --- |
+| `direction` | `ancestors` / `descendants` / `both` | `both` | Which direction to traverse |
+| `depth` | 0–20 | `2` | How many hops to follow |
+| `include_modules` | `true` / `false` | `false` | Whether to include `uses-module` edges |
+
+**Manual links:**
+
+Runs, datasets, artifacts, and modules that are related but not connected by an automatic edge can be linked manually. Links appear in the Lineage view.
+
+```
+POST /api/links
+Body: { "src": "<node_id>", "dst": "<node_id>", "note": "<optional text>" }
+
+DELETE /api/links/{link_id}
+```
+
+Node ID format:
+
+| Prefix | Example | Refers to |
+| --- | --- | --- |
+| `run:` | `run:train__20260612-153000__a1b2` | A run |
+| `dataset:` | `dataset:imagenet` | A registered dataset |
+| `artifact:` | `artifact:train__20260612-153000__a1b2/weights/final.pt` | A specific artifact |
+| `module:` | `module:ResNet` | A registered module |
+
 ---
 
 ## 11. Organization: Tags, Groups, Stars, and Deletion
 
-Annotations can be set at **launch time** (via the UI job launch form or `CreateRunRequest.annotations`) or edited **after the fact** (via the UI Overview tab or `PATCH /api/runs/{run_id}`).
+Annotations can be set at **launch time** (via the UI job launch form or `POST /api/runs`) or edited **after the fact** (via the UI Overview tab or `PATCH /api/runs/{run_id}`).
+
+**`POST /api/runs` request body (`CreateRunRequest`):**
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `job` | `str` | (required) | Job name |
+| `config` | `dict` | (required) | Config values |
+| `gpus` | `list[str]` | (required, ≥1) | GPU IDs |
+| `force` | `bool` | `false` | Launch even if the GPU is occupied |
+| `annotations` | `Annotations \| null` | `null` | Tags, star, group, title, memo |
+| `save_config_as` | `str \| null` | `null` | Save the config under this name at launch time (see §12) |
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -609,7 +648,89 @@ Deleting a run permanently removes its entire store directory — metadata, logs
 
 ---
 
-## 12. Document Viewer
+## 12. Saved Configs
+
+A **saved config** is a named set of config values for a specific job. Saved configs can be selected in the UI launch form to pre-fill fields, eliminating the need to re-enter the same values for repeated experiments.
+
+### Saving a config
+
+**At launch time (UI):** The job launch form has a "Save config as" field. Filling it in saves the config automatically when the run is created.
+
+**At launch time (API):** Set `save_config_as` in `CreateRunRequest`:
+
+```json
+{
+  "job": "train",
+  "config": { "lr": 3e-4, "epochs": 50 },
+  "gpus": ["nvidia:0"],
+  "save_config_as": "baseline-lr3e-4"
+}
+```
+
+**Directly (API):**
+
+```
+PUT /api/configs/{name}
+Body: { "job": "<job_name>", "values": { ... } }
+```
+
+Names must match `[A-Za-z0-9_.-]+`. Saving to an existing name overwrites it if the config belongs to the same job; saving to a name that belongs to a different job returns `409 config-name-conflict`.
+
+### Managing saved configs
+
+```
+GET    /api/configs               # List all saved configs
+GET    /api/configs/{name}        # Get a specific saved config
+DELETE /api/configs/{name}        # Delete a saved config  (204 No Content)
+```
+
+### Config diff (schema change detection)
+
+When a job's Config class changes (fields added, removed, or type-changed), call `/diff` to see whether a saved config is still compatible with the current schema:
+
+```
+POST /api/configs/{name}/diff
+Body (optional): { "job": "<target_job_name>" }
+```
+
+Response (`ConfigDiff`):
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `name` | `str` | Config name |
+| `job` | `str` | Target job |
+| `compatible` | `bool` | Whether the saved values are usable with the current schema |
+| `changes` | `list` | Differences detected. Each entry: `field`, `kind` (`added` / `removed` / `type_changed` / `constraint_changed`), `detail` |
+| `migrated_values` | `dict` | Values after applying defaults for newly added fields |
+
+`compatible` is `false` if any `type_changed` or `constraint_changed` difference is found. `added` / `removed` fields alone do not break compatibility (defaults are applied or the value is dropped).
+
+---
+
+## 13. Run Comparison
+
+Compare config values and metrics across multiple runs side by side:
+
+```
+GET /api/compare/runs?run_id=<id1>&run_id=<id2>[&run_id=<id3>...]
+```
+
+At least 2 `run_id` query parameters are required.
+
+**Response (`CompareRunsResponse`):**
+
+| Field | Description |
+| --- | --- |
+| `runs[]` | One entry per run: `run_id`, `job`, `status`, `config`, and per-metric stats (`count`, `latest`, `min`, `max`) |
+| `config_fields[]` | Union of all config keys across all runs |
+| `metric_names[]` | Union of all metric names across all runs |
+| `config_diffs[]` | Config fields whose values differ across runs. Each entry: `field`, `values` (map of `run_id → value`), `missing_run_ids` |
+
+`config_diffs` contains only the fields that vary — fields with identical values across all runs are omitted.
+
+---
+
+## 14. Document Viewer
 
 Markdown, Typst, and TypMark files placed in the project's `docs/` directory (configurable via `[docs] root` in `mikon.toml`) are viewable in the "Docs" tab of the dashboard.
 
@@ -639,7 +760,7 @@ docs/
 
 ---
 
-## 13. mikon.toml Reference
+## 15. mikon.toml Reference
 
 ```toml
 [mikon]
@@ -670,7 +791,7 @@ All keys are optional. Default values are used when `mikon.toml` does not exist.
 
 ---
 
-## 14. Store Layout
+## 16. Store Layout
 
 The store defaults to `.mikon/` (configurable via `store` in `mikon.toml`). The `MIKON_STORE` environment variable overrides it at runtime.
 
@@ -704,7 +825,7 @@ All files are plain text and can be read directly without the dashboard. The das
 
 ---
 
-## 15. GPU Management
+## 17. GPU Management
 
 ### GPU ID Format
 
@@ -743,7 +864,7 @@ Checks whether GPUs are correctly detected and whether installed frameworks are 
 
 ---
 
-## 16. Authentication and Access Control
+## 18. Authentication and Access Control
 
 | Bind address | Authentication |
 | --- | --- |
@@ -760,7 +881,7 @@ The current CLI does not support passing a token as an argument, so connecting t
 
 ---
 
-## 17. API Error Model
+## 19. API Error Model
 
 mikon returns errors in [RFC 9457 Problem Details](https://www.rfc-editor.org/rfc/rfc9457) format (`application/problem+json`).
 
