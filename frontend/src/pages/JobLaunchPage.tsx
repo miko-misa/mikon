@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { api } from "@/lib/api";
 import type { JobDetail, GpuInfo, ConfigInstance } from "@/lib/types";
 import { ConfigForm } from "@/components/ConfigForm";
 import { GpuSelector } from "@/components/GpuSelector";
+import { LaunchLineagePreview } from "@/components/LineageCanvas";
 import { TagInput } from "@/components/TagInput";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +16,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
@@ -28,17 +28,106 @@ interface JobLaunchPageProps {
   navigate: (path: string) => void;
 }
 
-function buildDefaults(schema: Record<string, unknown>): Record<string, unknown> {
-  const props = schema.properties as
-    | Record<string, Record<string, unknown>>
-    | undefined;
+function WorkbenchSection({
+  title,
+  description,
+  children,
+  className,
+}: {
+  title: string;
+  description?: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={cn("border-t border-border pt-5", className)}>
+      <div className="mb-3">
+        <h2 className="text-sm font-semibold">{title}</h2>
+        {description && (
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{description}</p>
+        )}
+      </div>
+      <div className="space-y-3">{children}</div>
+    </section>
+  );
+}
+
+type JsonSchema = Record<string, unknown>;
+
+function resolveRef(ref: string, rootSchema: JsonSchema): JsonSchema | null {
+  const parts = ref.replace(/^#\//, "").split("/");
+  let cur: unknown = rootSchema;
+  for (const part of parts) {
+    if (cur == null || typeof cur !== "object") return null;
+    cur = (cur as Record<string, unknown>)[part];
+  }
+  return (cur as JsonSchema) ?? null;
+}
+
+function resolveSchema(schema: JsonSchema, rootSchema: JsonSchema): JsonSchema {
+  if (typeof schema.$ref === "string") {
+    const resolved = resolveRef(schema.$ref, rootSchema);
+    if (resolved) return resolveSchema(resolved, rootSchema);
+  }
+  return schema;
+}
+
+function unwrapOptional(schema: JsonSchema): JsonSchema {
+  if (Array.isArray(schema.anyOf)) {
+    const nonNull = (schema.anyOf as JsonSchema[]).filter(
+      (option) =>
+        !(option.type === "null" || (Array.isArray(option.type) && option.type.includes("null")))
+    );
+    if (nonNull.length === 1 && nonNull.length !== schema.anyOf.length) {
+      return nonNull[0];
+    }
+  }
+  return schema;
+}
+
+function buildDefaults(schema: JsonSchema, rootSchema: JsonSchema = schema): Record<string, unknown> {
+  const resolved = resolveSchema(unwrapOptional(resolveSchema(schema, rootSchema)), rootSchema);
+  const props = resolved.properties as Record<string, JsonSchema> | undefined;
   if (!props) return {};
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(props)) {
-    if (v.default !== undefined) {
-      out[k] = v.default;
-    } else if (v.type === "object" && v.properties) {
-      out[k] = buildDefaults(v as Record<string, unknown>);
+    const defaultValue = defaultValueForSchema(v, rootSchema);
+    if (defaultValue !== undefined) {
+      out[k] = defaultValue;
+    }
+  }
+  return out;
+}
+
+function defaultValueForSchema(schema: JsonSchema, rootSchema: JsonSchema): unknown {
+  const resolved = resolveSchema(unwrapOptional(resolveSchema(schema, rootSchema)), rootSchema);
+  if (resolved.default !== undefined) return resolved.default;
+  if (resolved["x-mikon-module-ref"] != null && Array.isArray(resolved.oneOf)) {
+    return buildModuleDefault(resolved.oneOf as JsonSchema[]);
+  }
+  if (resolved.type === "object" && resolved.properties) {
+    return buildDefaults(resolved, rootSchema);
+  }
+  return undefined;
+}
+
+function buildModuleDefault(options: JsonSchema[]): Record<string, unknown> | undefined {
+  const selected = options[0];
+  if (!selected) return undefined;
+  const props = selected.properties as Record<string, JsonSchema> | undefined;
+  const moduleField = props?.__module__;
+  const moduleName =
+    (typeof selected.title === "string" && selected.title) ||
+    (typeof moduleField?.const === "string" && moduleField.const) ||
+    (typeof moduleField?.default === "string" && moduleField.default);
+  if (!moduleName) return undefined;
+
+  const out: Record<string, unknown> = { __module__: moduleName };
+  for (const [key, propSchema] of Object.entries(props ?? {})) {
+    if (key === "__module__") continue;
+    const defaultValue = defaultValueForSchema(propSchema, selected);
+    if (defaultValue !== undefined) {
+      out[key] = defaultValue;
     }
   }
   return out;
@@ -148,179 +237,172 @@ export function JobLaunchPage({ jobName, configName, navigate }: JobLaunchPagePr
   }
 
   return (
-    <div className="p-6 space-y-6 max-w-3xl">
+    <div className="p-6">
       {/* Header */}
-      <div>
-        <div className="flex items-center gap-2 mb-1">
-          <Zap className="h-5 w-5 text-primary" />
-          <h1 className="text-2xl font-bold">{job.name}</h1>
-        </div>
-        {job.doc && (
-          <p className="text-sm text-muted-foreground">{job.doc}</p>
-        )}
-        <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
-          <FileCode className="h-3 w-3" />
-          {job.source_file}:{job.lineno}
-        </div>
-      </div>
-
-      <Separator />
-
-      {/* Saved configs */}
-      {savedConfigs.length > 0 && (
-        <div className="space-y-2">
-          <Label className="text-sm font-medium">Load saved config</Label>
-          <Select onValueChange={loadSavedConfig}>
-            <SelectTrigger className="max-w-xs">
-              <SelectValue placeholder="Select config..." />
-            </SelectTrigger>
-            <SelectContent>
-              {savedConfigs.map((c) => (
-                <SelectItem key={c.name} value={c.name}>
-                  {c.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-
-      {/* Config form */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Configuration</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ConfigForm
-            schema={job.json_schema}
-            uiSchema={job.ui_schema}
-            values={values}
-            onChange={setValues}
-            disabled={launching}
-          />
-        </CardContent>
-      </Card>
-
-      {/* Annotations */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">
-            Annotations{" "}
-            <span className="text-xs font-normal text-muted-foreground">
-              (optional)
-            </span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-3">
-            <Label className="text-sm w-12 shrink-0">Title</Label>
-            <Input
-              value={annTitle}
-              onChange={(e) => setAnnTitle(e.target.value)}
-              placeholder="Run title..."
-              disabled={launching}
-            />
-          </div>
-          <div className="grid grid-cols-[auto_1fr] items-start gap-x-4">
-            <Label className="text-sm w-12 shrink-0 pt-1.5">Tags</Label>
-            <TagInput
-              value={annTags}
-              onChange={setAnnTags}
-              disabled={launching}
-            />
-          </div>
-          <div className="grid grid-cols-[auto_1fr] items-center gap-x-4">
-            <Label className="text-sm w-12 shrink-0">Star</Label>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setAnnStar((s) => !s)}
-                disabled={launching}
-                className="transition-colors"
-              >
-                <Star
-                  className={cn(
-                    "h-5 w-5",
-                    annStar
-                      ? "fill-yellow-400 text-yellow-400"
-                      : "text-muted-foreground hover:text-yellow-400"
-                  )}
-                />
-              </button>
-              <span className="text-xs text-muted-foreground">
-                {annStar ? "Starred" : "Mark as starred"}
-              </span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* GPU selector */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">GPU Selection</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <GpuSelector
-            gpus={gpus}
-            selected={selectedGpus}
-            onChange={setSelectedGpus}
-            disabled={launching}
-          />
-        </CardContent>
-      </Card>
-
-      {/* Options */}
-      <div className="flex items-center justify-between rounded-lg border border-border p-4">
+      <div className="mx-auto max-w-7xl space-y-6">
         <div>
-          <Label className="text-sm font-medium">Force launch</Label>
-          <p className="text-xs text-muted-foreground">
-            Override GPU occupancy checks
-          </p>
-        </div>
-        <Switch
-          checked={force}
-          onCheckedChange={setForce}
-          disabled={launching}
-        />
-      </div>
-
-      {/* Launch button */}
-      <Button
-        className="w-full"
-        onClick={handleLaunch}
-        disabled={launching}
-        size="lg"
-      >
-        <Zap className="h-4 w-4" />
-        {launching ? "Launching..." : "Launch Run"}
-      </Button>
-
-      {/* Save config */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Save Configuration</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex gap-2">
-            <Input
-              placeholder="Config name..."
-              value={saveConfigName}
-              onChange={(e) => setSaveConfigName(e.target.value)}
-              disabled={saving}
-              className="flex-1"
-            />
-            <Button
-              variant="outline"
-              onClick={handleSaveConfig}
-              disabled={saving || !saveConfigName.trim()}
-            >
-              <Save className="h-4 w-4" />
-              {saving ? "Saving..." : "Save"}
-            </Button>
+          <div className="mb-1 flex items-center gap-2">
+            <Zap className="h-5 w-5 text-primary" />
+            <h1 className="text-2xl font-bold">{job.name}</h1>
           </div>
-        </CardContent>
-      </Card>
+          {job.doc && (
+            <p className="max-w-3xl text-sm text-muted-foreground">{job.doc}</p>
+          )}
+          <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <FileCode className="h-3 w-3" />
+            {job.source_file}:{job.lineno}
+          </div>
+        </div>
+
+        <Separator />
+
+        <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
+          <main className="min-w-0 space-y-8">
+            <ConfigForm
+              schema={job.json_schema}
+              uiSchema={job.ui_schema}
+              values={values}
+              onChange={setValues}
+              disabled={launching}
+              mode="edit"
+              title="Configuration"
+              description="Set the inputs that will be validated and written into the run config."
+            />
+
+            <LaunchLineagePreview jobName={job.name} values={values} />
+          </main>
+
+          <aside className="space-y-6 border-t border-border pt-6 lg:sticky lg:top-6 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
+            {savedConfigs.length > 0 && (
+              <WorkbenchSection
+                title="Load saved config"
+                description="Replace the form values with a saved configuration for this job."
+                className="border-t-0 pt-0"
+              >
+                <Select onValueChange={loadSavedConfig}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select config..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {savedConfigs.map((c) => (
+                      <SelectItem key={c.name} value={c.name}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </WorkbenchSection>
+            )}
+
+            <WorkbenchSection
+              title="Annotations"
+              description="Optional metadata used for filtering and reviewing runs later."
+              className={cn(savedConfigs.length === 0 && "border-t-0 pt-0")}
+            >
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Title</Label>
+                  <Input
+                    value={annTitle}
+                    onChange={(e) => setAnnTitle(e.target.value)}
+                    placeholder="Run title..."
+                    disabled={launching}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Tags</Label>
+                  <TagInput
+                    value={annTags}
+                    onChange={setAnnTags}
+                    disabled={launching}
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs text-muted-foreground">Star</Label>
+                  <button
+                    type="button"
+                    onClick={() => setAnnStar((s) => !s)}
+                    disabled={launching}
+                    className="flex items-center gap-2 transition-colors"
+                  >
+                    <Star
+                      className={cn(
+                        "h-5 w-5",
+                        annStar
+                          ? "fill-yellow-400 text-yellow-400"
+                          : "text-muted-foreground hover:text-yellow-400"
+                      )}
+                    />
+                    <span className="text-xs text-muted-foreground">
+                      {annStar ? "Starred" : "Mark as starred"}
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </WorkbenchSection>
+
+            <WorkbenchSection
+              title="Compute"
+              description="Select GPUs and decide whether to override occupancy checks."
+            >
+              <GpuSelector
+                gpus={gpus}
+                selected={selectedGpus}
+                onChange={setSelectedGpus}
+                disabled={launching}
+              />
+              <div className="flex items-center justify-between border-t border-border pt-3">
+                <div>
+                  <Label className="text-sm font-medium">Force launch</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Override GPU occupancy checks
+                  </p>
+                </div>
+                <Switch
+                  checked={force}
+                  onCheckedChange={setForce}
+                  disabled={launching}
+                />
+              </div>
+            </WorkbenchSection>
+
+            <WorkbenchSection
+              title="Save configuration"
+              description="Store the current form values for reuse."
+            >
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Config name..."
+                  value={saveConfigName}
+                  onChange={(e) => setSaveConfigName(e.target.value)}
+                  disabled={saving}
+                  className="flex-1"
+                />
+                <Button
+                  variant="outline"
+                  onClick={handleSaveConfig}
+                  disabled={saving || !saveConfigName.trim()}
+                >
+                  <Save className="h-4 w-4" />
+                  {saving ? "Saving..." : "Save"}
+                </Button>
+              </div>
+            </WorkbenchSection>
+
+            <div className="border-t border-border pt-5">
+              <Button
+                className="w-full"
+                onClick={handleLaunch}
+                disabled={launching}
+                size="lg"
+              >
+                <Zap className="h-4 w-4" />
+                {launching ? "Launching..." : "Launch Run"}
+              </Button>
+            </div>
+          </aside>
+        </div>
+      </div>
     </div>
   );
 }
