@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { GitCompare, Edit2, Check } from "lucide-react";
+import { AlertTriangle, GitCompare, Edit2, Check } from "lucide-react";
 import { toast } from "sonner";
 
 interface GroupDetailPageProps {
@@ -32,22 +32,28 @@ export function GroupDetailPage({ groupId, navigate }: GroupDetailPageProps) {
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
       try {
-        const [g, allRuns] = await Promise.all([
+        setError(null);
+        const [g, groupRuns] = await Promise.all([
           api.get<Group>(`/api/groups/${groupId}`),
-          api.get<RunSummary[]>("/api/runs?limit=1000"),
+          api.get<RunSummary[]>(`/api/groups/${groupId}/runs`),
         ]);
         if (cancelled) return;
         setGroup(g);
         setName(g.name);
         setDesc(g.description ?? "");
-        setRuns(allRuns.filter((r) => r.annotations.group_ids.includes(groupId)));
+        setRuns(groupRuns);
       } catch (e) {
-        if (!cancelled) toast.error(String(e));
+        if (!cancelled) {
+          const message = String(e);
+          setError(message);
+          toast.error(message);
+        }
       }
     }
     load();
@@ -74,6 +80,19 @@ export function GroupDetailPage({ groupId, navigate }: GroupDetailPageProps) {
   function handleCompareAll() {
     if (!runs || runs.length < 2) return;
     navigate(`/compare?ids=${runs.map((r) => r.run_id).join(",")}`);
+  }
+
+  if (error) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center p-8 text-center">
+        <AlertTriangle className="mb-3 h-10 w-10 text-destructive" />
+        <h3 className="text-base font-medium">Group failed to load</h3>
+        <p className="mt-2 max-w-md text-sm text-muted-foreground">{error}</p>
+        <Button variant="outline" size="sm" className="mt-4" onClick={() => navigate("/groups")}>
+          Back to groups
+        </Button>
+      </div>
+    );
   }
 
   if (!group) {

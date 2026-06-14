@@ -15,7 +15,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Layers, Plus } from "lucide-react";
+import { AlertTriangle, Layers, Plus } from "lucide-react";
 import { toast } from "sonner";
 
 interface GroupsPageProps {
@@ -29,12 +29,14 @@ export function GroupsPage({ navigate }: GroupsPageProps) {
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function loadGroups() {
     try {
+      setError(null);
       const [gs, runs] = await Promise.all([
         api.get<Group[]>("/api/groups"),
-        api.get<RunSummary[]>("/api/runs?limit=1000"),
+        api.get<RunSummary[]>("/api/runs?limit=500"),
       ]);
       setGroups(gs);
       const counts: Record<string, number> = {};
@@ -45,7 +47,9 @@ export function GroupsPage({ navigate }: GroupsPageProps) {
       }
       setRunCounts(counts);
     } catch (e) {
-      toast.error(String(e));
+      const message = String(e);
+      setError(message);
+      toast.error(message);
     }
   }
 
@@ -125,7 +129,16 @@ export function GroupsPage({ navigate }: GroupsPageProps) {
         </Dialog>
       </div>
 
-      {groups == null ? (
+      {error ? (
+        <div className="flex flex-col items-center justify-center rounded-lg border border-destructive/40 bg-destructive/10 p-12 text-center">
+          <AlertTriangle className="mb-3 h-10 w-10 text-destructive" />
+          <h3 className="text-sm font-medium">Groups failed to load</h3>
+          <p className="mt-1 max-w-md text-xs text-muted-foreground">{error}</p>
+          <Button variant="outline" size="sm" className="mt-4" onClick={loadGroups}>
+            Retry
+          </Button>
+        </div>
+      ) : groups == null ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {[...Array(4)].map((_, i) => (
             <Skeleton key={i} className="h-28 w-full" />
