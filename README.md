@@ -37,7 +37,7 @@ A self-hosted tool for managing AI development (training and evaluation jobs) on
 
 ```bash
 # Install
-uv add mikon   # or: pip install mikon
+uv tool install mikon   # or: pip install mikon
 
 # Initialize project
 mikon init
@@ -79,7 +79,7 @@ ssh -L 8000:localhost:8000 you@gpu-server
 ## Installation
 
 ```bash
-uv add mikon   # recommended
+uv tool install mikon   # recommended
 pip install mikon
 ```
 

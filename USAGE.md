@@ -36,7 +36,7 @@ Requirements: **Python 3.11+**, a GPU server (NVIDIA or AMD ROCm).
 
 ```bash
 # With uv (recommended)
-uv add mikon
+uv tool install mikon
 
 # With pip
 pip install mikon

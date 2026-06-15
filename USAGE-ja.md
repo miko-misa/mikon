@@ -36,7 +36,7 @@
 
 ```bash
 # uv の場合（推奨）
-uv add mikon
+uv tool install mikon
 
 # pip の場合
 pip install mikon

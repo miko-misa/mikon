@@ -37,7 +37,7 @@ GPUサーバー上のAI開発（学習・評価ジョブ）をブラウザで管
 
 ```bash
 # インストール
-uv add mikon   # または pip install mikon
+uv tool install mikon   # または pip install mikon
 
 # プロジェクト初期化
 mikon init
@@ -79,7 +79,7 @@ ssh -L 8000:localhost:8000 you@gpu-server
 ## インストール
 
 ```bash
-uv add mikon   # 推奨
+uv tool install mikon   # 推奨
 pip install mikon
 ```
 
