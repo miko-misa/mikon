@@ -10,6 +10,7 @@ class Settings:
     project_root: Path
     watch: tuple[Path, ...]
     store: Path
+    python: str | None = None
     occupancy_mem_mb: int = 500
     occupancy_util: float = 5.0
     docs_root: Path | None = None
@@ -32,10 +33,16 @@ def load_settings(project_root: Path | None = None) -> Settings:
     watch_paths = tuple((root / item).resolve() for item in watch_values)
     store = (root / mikon_data.get("store", ".mikon")).resolve()
     docs_root = docs_data.get("root", "docs")
+    python_raw = mikon_data.get("python")
+    python: str | None = None
+    if python_raw is not None:
+        p = Path(python_raw)
+        python = str(root / p if not p.is_absolute() else p)
     return Settings(
         project_root=root,
         watch=watch_paths,
         store=store,
+        python=python,
         occupancy_mem_mb=int(gpu_data.get("occupancy_mem_mb", 500)),
         occupancy_util=float(gpu_data.get("occupancy_util", 5)),
         docs_root=(root / docs_root).resolve(),

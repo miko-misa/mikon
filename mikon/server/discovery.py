@@ -39,8 +39,9 @@ class DiscoveryOutput:
 
 
 def discover_subprocess(settings: Settings) -> DiscoveryOutput:
+    _python = settings.python or sys.executable
     command = [
-        sys.executable,
+        _python,
         "-m",
         "mikon.server.discovery",
         "discover",
@@ -63,8 +64,9 @@ def discover_subprocess(settings: Settings) -> DiscoveryOutput:
 def validate_config_subprocess(
     settings: Settings, job_name: str, config: dict[str, Any]
 ) -> dict[str, Any]:
+    _python = settings.python or sys.executable
     command = [
-        sys.executable,
+        _python,
         "-m",
         "mikon.server.discovery",
         "validate",
@@ -107,8 +109,9 @@ def validate_config_subprocess(
 def validate_dataset_config_subprocess(
     settings: Settings, dataset_name: str, config: dict[str, Any]
 ) -> dict[str, Any]:
+    _python = settings.python or sys.executable
     command = [
-        sys.executable,
+        _python,
         "-m",
         "mikon.server.discovery",
         "validate-dataset",

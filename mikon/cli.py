@@ -179,6 +179,7 @@ def _raise_for_problem(response: httpx.Response) -> None:
 MIKON_TOML = """[mikon]
 watch = ["src"]
 store = ".mikon"
+# python = ".venv/bin/python"  # set to use project venv for discovery and job runner
 
 [gpu]
 occupancy_mem_mb = 500

@@ -70,7 +70,8 @@ class Runner:
         if request.save_config_as:
             self.store.ensure_config_name_available(request.save_config_as, request.job)
         run_id = self.store.new_run_id(request.job)
-        command = [sys.executable, "-m", "mikon._runner", "--run-dir", str(self.store.run_dir(run_id))]
+        _python = self.registry.settings.python or sys.executable
+        command = [_python, "-m", "mikon._runner", "--run-dir", str(self.store.run_dir(run_id))]
         run_dir = self.store.create_run(
             run_id=run_id,
             job=request.job,
@@ -171,7 +172,8 @@ class Runner:
             self.registry.settings, name, request.config
         )
         run_id = self.store.new_run_id(f"dataset_{name}")
-        command = [sys.executable, "-m", "mikon._runner", "--run-dir", str(self.store.run_dir(run_id))]
+        _python = self.registry.settings.python or sys.executable
+        command = [_python, "-m", "mikon._runner", "--run-dir", str(self.store.run_dir(run_id))]
         run_dir = self.store.create_run(
             run_id=run_id,
             kind="dataset",
