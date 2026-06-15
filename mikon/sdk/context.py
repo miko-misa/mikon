@@ -10,6 +10,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from mikon._utils import is_relative_to
+
 
 class RunContext:
     """Runtime handle injected into mikon jobs."""
@@ -53,7 +55,7 @@ class RunContext:
         artifact_path = _validate_artifact_name(name)
         destination = (self.artifacts_dir / artifact_path).resolve()
         artifacts_root = self.artifacts_dir.resolve()
-        if not _is_relative_to(destination, artifacts_root):
+        if not is_relative_to(destination, artifacts_root):
             raise ValueError("artifact name must stay within artifacts_dir")
         destination.parent.mkdir(parents=True, exist_ok=True)
         if source.resolve() != destination.resolve():
@@ -100,7 +102,7 @@ class RunContext:
         store_root = _store_root(self.run_dir)
         artifacts_root = (store_root / "runs" / source_run_id / "artifacts").resolve()
         path = (artifacts_root / artifact_path).resolve()
-        if not _is_relative_to(path, artifacts_root) or not path.exists():
+        if not is_relative_to(path, artifacts_root) or not path.exists():
             raise FileNotFoundError(path)
         self._log_input(
             {
@@ -155,9 +157,3 @@ def _store_root(run_dir: Path) -> Path:
     return run_dir
 
 
-def _is_relative_to(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-        return True
-    except ValueError:
-        return False

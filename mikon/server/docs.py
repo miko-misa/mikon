@@ -15,6 +15,7 @@ import markdown as markdown_lib
 from markdown.extensions import Extension
 from markdown.treeprocessors import Treeprocessor
 
+from mikon._utils import is_relative_to
 from mikon.server.models import DocDocument, DocNode, DocTree
 from mikon.server.problems import ProblemException
 from mikon.server.settings import Settings
@@ -173,7 +174,7 @@ class DocsService:
                 resolved = child.resolve()
             except OSError:
                 continue
-            if not _is_relative_to(resolved, self.root):
+            if not is_relative_to(resolved, self.root):
                 continue
             if child.is_dir():
                 children = self._children(resolved, seen)
@@ -276,7 +277,7 @@ class DocsService:
                 path=path,
             )
         candidate = (self.root / Path(*pure.parts)).resolve()
-        if not _is_relative_to(candidate, self.root) or not candidate.is_file():
+        if not is_relative_to(candidate, self.root) or not candidate.is_file():
             raise ProblemException(
                 type="/problems/doc-not-found",
                 title="Document not found",
@@ -528,9 +529,3 @@ def _is_hidden(path: Path) -> bool:
     return path.name.startswith(".")
 
 
-def _is_relative_to(path: Path, root: Path) -> bool:
-    try:
-        path.resolve().relative_to(root.resolve())
-        return True
-    except ValueError:
-        return False

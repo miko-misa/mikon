@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 import psutil
 
+from mikon._utils import is_relative_to
 from mikon.server.models import (
     Annotations,
     AnnotationsPatch,
@@ -819,7 +820,7 @@ class Store:
             path = (artifact_root / artifact_path).resolve()
             if not self.run_dir(run_id).is_dir():
                 raise _link_problem(node_id, f"Unknown artifact run: {node_id}")
-            if not _is_relative_to(path, artifact_root.resolve()) or not path.exists():
+            if not is_relative_to(path, artifact_root.resolve()) or not path.exists():
                 raise _link_problem(node_id, f"Unknown artifact node: {node_id}")
             return
 
@@ -948,12 +949,6 @@ def _parse_artifact_node(node_id: str) -> tuple[str, Path]:
     return parts[1], artifact_path
 
 
-def _is_relative_to(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-        return True
-    except ValueError:
-        return False
 
 
 def _lineage_node_ids(
