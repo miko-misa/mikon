@@ -129,6 +129,7 @@ def _write_template(path: Path, content: str, force: bool) -> None:
 
 
 def _write_template_interactive(path: Path, content: str, force: bool) -> None:
+    import sys
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
@@ -137,6 +138,9 @@ def _write_template_interactive(path: Path, content: str, force: bool) -> None:
     if force:
         path.write_text(content, encoding="utf-8")
         typer.echo(f"Overwrote {path}")
+        return
+    if not sys.stdin.isatty():
+        typer.echo(f"Skipped existing {path}")
         return
     choice = typer.prompt(f"{path} already exists. [o]verwrite / [a]ppend / [s]kip", default="s")
     if choice.lower().startswith("o"):

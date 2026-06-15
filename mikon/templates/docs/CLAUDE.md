@@ -10,7 +10,7 @@ Full documentation: **`docs/USAGE.md`** in this project (or `docs/USAGE-ja.md` f
 
 ```
 mikon serve [--host HOST] [--port PORT] [--token SECRET]
-mikon run <job_path> --gpu <id>[,<id>...] [--config config.json] [--set key=val]
+mikon run <job_name> --gpu <id>[,<id>...] [--config config.json] [--set key=val]
 mikon stop <run_id>
 mikon doctor
 mikon dataset register <name> <path> [--description TEXT]
@@ -49,9 +49,10 @@ def train(config: MyConfig, ctx: RunContext) -> None:
 | Method | Description |
 |--------|-------------|
 | `ctx.log_metric(key, value, step=None)` | Record a scalar metric |
-| `ctx.log_artifact(name, path)` | Register a file as an artifact |
+| `ctx.log_artifact(name, path)` | Copy file at `path` into artifacts dir and register it |
 | `ctx.artifacts_dir` | Path for storing artifact files |
-| `ctx.add_dir(path, description=None)` | Register a directory as a dataset |
+| `ctx.use_dataset(name) -> Path` | Get path to a registered dataset |
+| `ctx.use_artifact(run_id, name) -> Path` | Get path to another run's artifact |
 
 ---
 
