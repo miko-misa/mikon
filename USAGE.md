@@ -770,6 +770,12 @@ watch = ["src"]
 # Storage root for runs, metrics, and artifacts (relative path)
 store = ".mikon"
 
+# Python interpreter used for job discovery and subprocess execution (optional).
+# Accepts a relative path (resolved from the project root) or an absolute path.
+# Symlinks are preserved so that pyvenv.cfg is found correctly for virtual envs.
+# Default: sys.executable (the Python that runs the mikon server)
+# python = ".venv/bin/python"
+
 [gpu]
 # Memory usage (MiB) above which a GPU is considered occupied
 # (NVIDIA: nvml; AMD: amdsmi or CLI)

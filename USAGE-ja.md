@@ -771,6 +771,12 @@ watch = ["src"]
 # run・メトリクス・成果物の保存先（相対パス）
 store = ".mikon"
 
+# ジョブ検出・サブプロセス実行に使う Python インタープリタ（省略可）。
+# 相対パスはプロジェクトルートから解決されます。シンボリックリンクは保持される
+# ため、仮想環境の pyvenv.cfg が正しく認識されます。
+# デフォルト: sys.executable（mikon サーバーを起動した Python）
+# python = ".venv/bin/python"
+
 [gpu]
 # このメモリ（MiB）を超えると「占有中」とみなす（NVIDIA: nvml、AMD: amdsmi/CLI）
 occupancy_mem_mb = 500
