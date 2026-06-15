@@ -855,7 +855,7 @@ export function RunDetailPage({ runId, navigate }: RunDetailPageProps) {
           title="Delete run?"
           description={
             <span>
-              Run <code className="font-mono text-xs bg-muted px-1 rounded">{runId}</code> とそのファイルを完全に削除します。この操作は元に戻せません。
+              Run <code className="font-mono text-xs bg-muted px-1 rounded">{runId}</code> and all its files will be permanently deleted. This action cannot be undone.
             </span>
           }
           confirmLabel="Delete"

@@ -106,13 +106,13 @@ export function DocsPage({ docPath, navigate }: DocsPageProps) {
   function reloadTree() {
     api.get<DocTree>("/api/docs")
       .then((result) => { setTree(result); setTreeError(null); })
-      .catch(() => {});
+      .catch((err) => { console.warn("Hot-reload: failed to refresh doc tree", err); });
   }
 
   function reloadDoc(path: string) {
     api.get<DocDocument>(`/api/docs/${encodeDocPath(path)}`)
       .then(setDoc)
-      .catch(() => {});
+      .catch((err) => { console.warn("Hot-reload: failed to refresh doc", err); });
   }
 
   // Resizable sidebar
