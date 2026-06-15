@@ -31,6 +31,10 @@ def init(
         src = _TEMPLATES_DIR / "docs" / fname
         if src.exists():
             _write_template(root / "docs" / fname, src.read_text(encoding="utf-8"), force)
+    for fname in ("CLAUDE.md", "AGENTS.md"):
+        src = _TEMPLATES_DIR / "docs" / fname
+        if src.exists():
+            _write_template_interactive(root / fname, src.read_text(encoding="utf-8"), force)
     typer.echo("Initialized mikon project.")
 
 
@@ -122,6 +126,28 @@ def _write_template(path: Path, content: str, force: bool) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
     typer.echo(f"Wrote {path}")
+
+
+def _write_template_interactive(path: Path, content: str, force: bool) -> None:
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        typer.echo(f"Wrote {path}")
+        return
+    if force:
+        path.write_text(content, encoding="utf-8")
+        typer.echo(f"Overwrote {path}")
+        return
+    choice = typer.prompt(f"{path} already exists. [o]verwrite / [a]ppend / [s]kip", default="s")
+    if choice.lower().startswith("o"):
+        path.write_text(content, encoding="utf-8")
+        typer.echo(f"Overwrote {path}")
+    elif choice.lower().startswith("a"):
+        existing = path.read_text(encoding="utf-8")
+        path.write_text(existing.rstrip() + "\n\n" + content, encoding="utf-8")
+        typer.echo(f"Appended to {path}")
+    else:
+        typer.echo(f"Skipped {path}")
 
 
 def _split_csv(value: str) -> list[str]:
