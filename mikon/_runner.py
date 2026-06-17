@@ -8,7 +8,7 @@ import threading
 import time
 import traceback
 from pathlib import Path
-from typing import TextIO
+from typing import Iterable, TextIO
 
 from mikon.sdk.datasets import DatasetContext, get_dataset_registry
 from mikon.sdk.context import RunContext
@@ -47,8 +47,10 @@ def main(argv: list[str] | None = None) -> int:
     event_logger = _LogEventWriter(run_dir / "logs" / "events.jsonl")
     original_stdout = sys.stdout
     original_stderr = sys.stderr
-    sys.stdout = _TeeLineWriter(original_stdout, event_logger, "stdout")
-    sys.stderr = _TeeLineWriter(original_stderr, event_logger, "stderr")
+    stdout_tee = _TeeLineWriter(original_stdout, event_logger, "stdout")
+    stderr_tee = _TeeLineWriter(original_stderr, event_logger, "stderr")
+    sys.stdout = stdout_tee
+    sys.stderr = stderr_tee
     try:
         project_root = Path(meta["project_root"]).resolve()
         watch_paths = [Path(item).resolve() for item in meta["watch"]]
@@ -77,6 +79,14 @@ def main(argv: list[str] | None = None) -> int:
         exit_code = 1
         error = traceback.format_exc()
     finally:
+        # Flush any buffered tail (output not terminated by a newline) into
+        # events.jsonl before restoring the streams, so the live log matches
+        # stdout.log/stderr.log. Guarded so write_status always runs.
+        try:
+            stdout_tee.flush()
+            stderr_tee.flush()
+        except Exception:
+            pass
         sys.stdout = original_stdout
         sys.stderr = original_stderr
         event_logger.flush()
@@ -111,6 +121,9 @@ class _LogEventWriter:
     def flush(self) -> None:
         return
 
+    def close(self) -> None:
+        return
+
 
 class _TeeLineWriter:
     def __init__(self, target: TextIO, event_logger: _LogEventWriter, stream: str) -> None:
@@ -134,8 +147,26 @@ class _TeeLineWriter:
             self.event_logger.write_line(self.stream, self._buffer)
             self._buffer = ""
 
+    def close(self) -> None:
+        # Never close the underlying real stream; mikon (the runner) owns its
+        # lifecycle. Some libraries (e.g. absl logging via JAX/TF) capture this
+        # writer as their handler stream and call close() at interpreter
+        # shutdown, after sys.stdout/stderr were already restored. A best-effort
+        # flush is all that is needed.
+        try:
+            self.flush()
+        except Exception:
+            pass
+
+    def writelines(self, lines: Iterable[str]) -> None:
+        for line in lines:
+            self.write(line)
+
     def isatty(self) -> bool:
         return self.target.isatty()
+
+    def fileno(self) -> int:
+        return self.target.fileno()
 
     @property
     def encoding(self) -> str | None:

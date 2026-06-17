@@ -1028,6 +1028,61 @@ def test_runner_records_failed_status_for_module_depth_violation(tmp_path: Path)
     assert "module nesting exceeds max depth 1" in status["error"]
 
 
+def test_runner_flushes_final_unterminated_line_into_events(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "mikon.toml").write_text(
+        '[mikon]\nwatch = ["src"]\nstore = ".mikon"\n', encoding="utf-8"
+    )
+    (tmp_path / "src" / "train.py").write_text(
+        """
+import mikon
+from mikon import Config, RunContext
+
+class TrainConfig(Config):
+    pass
+
+@mikon.job
+def train(config: TrainConfig, ctx: RunContext) -> None:
+    print("line1")          # newline -> emitted immediately
+    print("tail", end="")   # no newline -> only flushed by the finally block
+""",
+        encoding="utf-8",
+    )
+    settings = load_settings(tmp_path)
+    store = Store(settings.store)
+    run_dir = store.create_run(
+        run_id="tail-run",
+        job="train",
+        config={},
+        gpus=["nvidia:0"],
+        schema_hash="schema",
+        command=[],
+        project_root=tmp_path,
+        watch=list(settings.watch),
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "mikon._runner", "--run-dir", str(run_dir)],
+        cwd=tmp_path,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=10,
+        check=False,
+    )
+    status = store.read_json(run_dir / "status.json")
+    events = [
+        json.loads(line)
+        for line in (run_dir / "logs" / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert completed.returncode == 0, completed.stderr
+    assert status["status"] == "completed"
+    stdout_lines = [record["line"] for record in events if record["stream"] == "stdout"]
+    assert "line1" in stdout_lines
+    assert "tail" in stdout_lines  # the unterminated final line must not be dropped
+
+
 def test_run_list_is_created_at_descending(tmp_path: Path) -> None:
     store = Store(tmp_path / ".mikon")
     _write_manual_run(store, "z_run", "2026-01-01T00:00:00+00:00", pid=123)
@@ -1752,6 +1807,39 @@ def test_artifact_listing_includes_directories_and_compare_summarizes_metrics(tm
     assert compare.config_diffs[0].values == {"run1": 1, "run2": 2}
     assert compare.runs[0].metrics["loss"].latest == 1.0
     assert compare.runs[0].metrics["loss"].min == 1.0
+
+
+def test_teelinewriter_close_path_does_not_raise_and_keeps_target_open(tmp_path: Path) -> None:
+    from mikon._runner import _LogEventWriter, _TeeLineWriter
+
+    target = (tmp_path / "stdout.log").open("w", encoding="utf-8")
+    events_path = tmp_path / "events.jsonl"
+    try:
+        event_logger = _LogEventWriter(events_path)
+        tee = _TeeLineWriter(target, event_logger, "stdout")
+
+        # file-like surface used by libraries that bind sys.stdout/stderr
+        tee.writelines(["hello\n", "partial"])
+        assert tee.fileno() == target.fileno()
+        assert tee.isatty() is False  # non-tty log file: the branch absl takes
+
+        # Emulate absl PythonHandler.close(): close() is called on a non-tty
+        # stream that is no longer sys.stdout/stderr. It must not raise...
+        if not tee.isatty():
+            tee.close()
+        tee.close()  # idempotent / safe when buffer already flushed
+
+        # ...and must NOT close the underlying real stream (runner owns it).
+        assert target.closed is False
+        event_logger.close()  # sibling drop-in no-op
+    finally:
+        target.close()
+
+    records = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+    assert [(r["stream"], r["line"]) for r in records] == [
+        ("stdout", "hello"),
+        ("stdout", "partial"),  # buffered tail flushed by close()
+    ]
 
 
 def _write_manual_run(store: Store, run_id: str, created_at: str, pid: int | None) -> None:
