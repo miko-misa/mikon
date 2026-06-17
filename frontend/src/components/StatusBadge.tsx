@@ -1,7 +1,14 @@
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 
-type Status = "running" | "completed" | "failed" | "stopped" | "unknown";
+type Status =
+  | "running"
+  | "completed"
+  | "failed"
+  | "stopped"
+  | "unknown"
+  | "pending"
+  | "cancelled";
 
 interface StatusBadgeProps {
   status: Status;
@@ -9,6 +16,37 @@ interface StatusBadgeProps {
 }
 
 export function StatusBadge({ status, className }: StatusBadgeProps) {
+  if (status === "pending") {
+    return (
+      <span
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-xs font-semibold text-amber-400",
+          className
+        )}
+      >
+        <span className="relative flex h-2 w-2">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-400" />
+        </span>
+        Pending
+      </span>
+    );
+  }
+
+  if (status === "cancelled") {
+    return (
+      <Badge
+        className={cn(
+          "border-zinc-500/30 bg-zinc-500/10 text-zinc-400 hover:bg-zinc-500/10",
+          className
+        )}
+        variant="outline"
+      >
+        Cancelled
+      </Badge>
+    );
+  }
+
   if (status === "running") {
     return (
       <span

@@ -84,8 +84,9 @@ export function RunsPage({ navigate }: RunsPageProps) {
   // Auto-refresh every 3s when there are running runs
   useEffect(() => {
     if (intervalRef.current) clearInterval(intervalRef.current);
-    const hasRunning = runs?.some((r) => r.status === "running") ?? false;
-    if (hasRunning) {
+    const hasActive =
+      runs?.some((r) => r.status === "running" || r.status === "pending") ?? false;
+    if (hasActive) {
       intervalRef.current = setInterval(loadRuns, 3000);
     }
     return () => {
@@ -192,10 +193,12 @@ export function RunsPage({ navigate }: RunsPageProps) {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All statuses</SelectItem>
+            <SelectItem value="pending">Pending</SelectItem>
             <SelectItem value="running">Running</SelectItem>
             <SelectItem value="completed">Completed</SelectItem>
             <SelectItem value="failed">Failed</SelectItem>
             <SelectItem value="stopped">Stopped</SelectItem>
+            <SelectItem value="cancelled">Cancelled</SelectItem>
           </SelectContent>
         </Select>
 

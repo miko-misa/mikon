@@ -52,7 +52,7 @@ export function JobsPage({ navigate }: JobsPageProps) {
             <Card
               key={job.name}
               className="hover:border-primary/50 transition-colors cursor-pointer"
-              onClick={() => navigate(`/jobs/${job.name}`)}
+              onClick={() => navigate(`/pipeline?job=${encodeURIComponent(job.name)}`)}
             >
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex items-center gap-2">
@@ -77,7 +77,7 @@ export function JobsPage({ navigate }: JobsPageProps) {
                   className="w-full"
                   onClick={(e) => {
                     e.stopPropagation();
-                    navigate(`/jobs/${job.name}`);
+                    navigate(`/pipeline?job=${encodeURIComponent(job.name)}`);
                   }}
                 >
                   <Zap className="h-3.5 w-3.5" />

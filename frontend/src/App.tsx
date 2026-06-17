@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { JobsPage } from "@/pages/JobsPage";
-import { JobLaunchPage } from "@/pages/JobLaunchPage";
+import { PipelinePage } from "@/pages/PipelinePage";
 import { RunsPage } from "@/pages/RunsPage";
 import { RunDetailPage } from "@/pages/RunDetailPage";
 import { GroupsPage } from "@/pages/GroupsPage";
@@ -22,15 +22,14 @@ function parseRoute(path: string, search: string): Route {
 
   switch (parts[0]) {
     case "jobs":
+      // Launching a single job is just a one-step pipeline seeded with that job.
       if (parts[1]) {
-        return {
-          kind: "job",
-          name: decodeURIComponent(parts[1]),
-          configName: params.get("config"),
-        };
+        return { kind: "pipeline", job: decodeURIComponent(parts[1]) };
       }
-      // /jobs → show jobs list, represented as dashboard-level
+      // /jobs → show jobs catalog
       return { kind: "job", name: "", configName: null };
+    case "pipeline":
+      return { kind: "pipeline", job: params.get("job") };
     case "runs":
       if (parts[1])
         return { kind: "run", id: decodeURIComponent(parts[1]) };
@@ -93,14 +92,9 @@ export function App() {
       case "dashboard":
         return <DashboardPage navigate={navigate} />;
       case "job":
-        if (!route.name) return <JobsPage navigate={navigate} />;
-        return (
-          <JobLaunchPage
-            jobName={route.name}
-            configName={route.configName}
-            navigate={navigate}
-          />
-        );
+        return <JobsPage navigate={navigate} />;
+      case "pipeline":
+        return <PipelinePage navigate={navigate} initialJob={route.job} />;
       case "run":
         if (!route.id) return <RunsPage navigate={navigate} />;
         return <RunDetailPage runId={route.id} navigate={navigate} />;

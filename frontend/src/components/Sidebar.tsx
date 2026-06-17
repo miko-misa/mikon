@@ -9,6 +9,7 @@ import {
   Database,
   BookOpen,
   Cpu,
+  GitBranch,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
@@ -32,6 +33,7 @@ const NAV_ITEMS: NavItem[] = [
     path: "/",
     routeKind: "dashboard",
   },
+  { label: "Pipeline", icon: GitBranch, path: "/pipeline", routeKind: ["pipeline"] },
   { label: "Jobs", icon: Zap, path: "/jobs", routeKind: ["job"] },
   { label: "Runs", icon: Play, path: "/runs", routeKind: ["run", "compare"] },
   { label: "Groups", icon: Layers, path: "/groups", routeKind: ["group", "groups"] },

@@ -12,6 +12,7 @@ export type JobInfo = {
   source_file: string;
   lineno: number;
   schema_hash: string;
+  output_artifacts: string[];
 };
 
 export type JobDetail = JobInfo & {
@@ -19,10 +20,19 @@ export type JobDetail = JobInfo & {
   ui_schema: Record<string, unknown>;
 };
 
+export type RunStatus =
+  | "running"
+  | "completed"
+  | "failed"
+  | "stopped"
+  | "unknown"
+  | "pending"
+  | "cancelled";
+
 export type RunSummary = {
   run_id: string;
   job: string;
-  status: "running" | "completed" | "failed" | "stopped" | "unknown";
+  status: RunStatus;
   gpus: string[];
   created_at: string;
   started_at?: string | null;
@@ -41,6 +51,25 @@ export type RunDetail = RunSummary & {
   error?: string | null;
   metric_names: string[];
   artifact_count: number;
+  depends_on: string[];
+  pending_reason?: string | null;
+};
+
+export type ChainStep = {
+  job: string;
+  config: Record<string, unknown>;
+  gpus: string[];
+  force?: boolean;
+  annotations?: Annotations | null;
+};
+
+export type CreateChainRequest = {
+  steps: ChainStep[];
+  on_upstream_failure: "cancel" | "continue";
+};
+
+export type CreateChainResponse = {
+  run_ids: string[];
 };
 
 export type MetricRecord = {
@@ -213,4 +242,5 @@ export type Route =
   | { kind: "datasets" }
   | { kind: "datasetBuilder"; name: string }
   | { kind: "docs"; path?: string | null }
-  | { kind: "compare"; ids: string[] };
+  | { kind: "compare"; ids: string[] }
+  | { kind: "pipeline"; job?: string | null };

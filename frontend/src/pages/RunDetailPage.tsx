@@ -700,7 +700,7 @@ export function RunDetailPage({ runId, navigate }: RunDetailPageProps) {
     async function init() {
       const r = await fetchRun();
       if (cancelled || !r) return;
-      if (r.status === "running") {
+      if (r.status === "running" || r.status === "pending") {
         intervalRef.current = setInterval(async () => {
           const updated = await api
             .get<RunDetail>(`/api/runs/${runId}`)
@@ -796,7 +796,29 @@ export function RunDetailPage({ runId, navigate }: RunDetailPageProps) {
           <div className="flex items-center gap-2 mt-1 flex-wrap">
             <span className="text-sm text-muted-foreground">{run.job}</span>
             <StatusBadge status={run.status} />
+            {run.status === "pending" && run.pending_reason && (
+              <span className="text-xs text-amber-400">
+                {run.pending_reason === "waiting-for-gpu"
+                  ? "waiting for GPU"
+                  : "waiting for upstream"}
+              </span>
+            )}
           </div>
+          {run.depends_on && run.depends_on.length > 0 && (
+            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+              <span>Depends on:</span>
+              {run.depends_on.map((dep) => (
+                <button
+                  key={dep}
+                  type="button"
+                  onClick={() => navigate(`/runs/${dep}`)}
+                  className="rounded bg-muted px-1.5 py-0.5 font-mono hover:text-foreground"
+                >
+                  {dep}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
             <span>Created {run.created_at ? formatDate(run.created_at) : "—"}</span>
             <span>Duration: {duration}</span>
@@ -827,7 +849,7 @@ export function RunDetailPage({ runId, navigate }: RunDetailPageProps) {
               )}
             />
           </Button>
-          {run.status === "running" && (
+          {(run.status === "running" || run.status === "pending") && (
             <Button
               variant="destructive"
               size="sm"
@@ -835,7 +857,13 @@ export function RunDetailPage({ runId, navigate }: RunDetailPageProps) {
               disabled={stopping}
             >
               <Square className="h-4 w-4" />
-              {stopping ? "Stopping..." : "Stop"}
+              {stopping
+                ? run.status === "pending"
+                  ? "Cancelling..."
+                  : "Stopping..."
+                : run.status === "pending"
+                  ? "Cancel"
+                  : "Stop"}
             </Button>
           )}
           <Button
