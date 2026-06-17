@@ -19,6 +19,7 @@ from mikon.server.models import (
     BuildDatasetRequest,
     ConfigDiffRequest,
     ConfigSaveRequest,
+    CreateChainRequest,
     CreateRunRequest,
     DatasetCreate,
     GroupCreate,
@@ -82,6 +83,10 @@ def create_api_router() -> APIRouter:
     @router.post("/runs", status_code=201)
     def create_run(body: CreateRunRequest, request: Request):
         return request.app.state.runner.create_run(body)
+
+    @router.post("/chains", status_code=201)
+    def create_chain(body: CreateChainRequest, request: Request):
+        return request.app.state.runner.create_chain(body)
 
     @router.get("/runs")
     def list_runs(

@@ -14,6 +14,7 @@ from mikon.server.problems import ProblemException
 from mikon.server.registry import Registry
 from mikon.server.resources import ResourceMonitor
 from mikon.server.runner import Runner
+from mikon.server.scheduler import ChainScheduler
 from mikon.server.settings import Settings, load_settings
 from mikon.server.store import Store
 
@@ -29,12 +30,15 @@ def create_app(
     registry = Registry(resolved_settings)
     resources = ResourceMonitor(resolved_settings, store)
     runner = Runner(store=store, registry=registry, resources=resources)
+    scheduler = ChainScheduler(store=store, runner=runner)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         registry.refresh()
         registry.start_watching()
+        scheduler.start()
         yield
+        await scheduler.stop()
         registry.stop_watching()
 
     app = FastAPI(
@@ -49,6 +53,7 @@ def create_app(
     app.state.registry = registry
     app.state.resources = resources
     app.state.runner = runner
+    app.state.scheduler = scheduler
     app.state.token = token
 
     app.add_middleware(

@@ -46,7 +46,20 @@ TERMINAL_STATUSES = {
     RunStatus.failed,
     RunStatus.stopped,
     RunStatus.unknown,
+    RunStatus.cancelled,
 }
+
+# Upstream statuses that mean a downstream chain step can never get its inputs.
+UPSTREAM_FAILURE_STATUSES = {
+    RunStatus.failed,
+    RunStatus.stopped,
+    RunStatus.unknown,
+    RunStatus.cancelled,
+}
+
+
+class ArtifactResolutionError(Exception):
+    """Raised when an ArtifactRef cannot be resolved to an existing artifact."""
 
 
 class Store:
@@ -81,6 +94,10 @@ class Store:
         watch: list[Path],
         annotations: Annotations | None = None,
         kind: Literal["job", "dataset"] = "job",
+        pending: bool = False,
+        depends_on: list[str] | None = None,
+        on_upstream_failure: Literal["cancel", "continue"] = "cancel",
+        force: bool = False,
     ) -> Path:
         annotations = annotations or Annotations()
         self._ensure_groups_exist(annotations.group_ids)
@@ -108,7 +125,12 @@ class Store:
                     "project_root": str(project_root),
                     "watch": [str(item) for item in watch],
                     "created_at": now,
-                    "started_at": now,
+                    "started_at": None if pending else now,
+                    "pending": pending,
+                    "pending_reason": "waiting-for-upstream" if pending else None,
+                    "depends_on": list(depends_on or []),
+                    "on_upstream_failure": on_upstream_failure,
+                    "force": force,
                 },
             )
             self.write_json(run_dir / "annotations.json", annotations.model_dump(mode="json"))
@@ -141,6 +163,132 @@ class Store:
                 "error": error,
             },
         )
+
+    # ---- job chains (pending runs) ----
+
+    def read_meta(self, run_id: str) -> dict[str, Any]:
+        return self.read_json(self.require_run_dir(run_id) / "meta.json")
+
+    def run_status(self, run_id: str) -> RunStatus:
+        return RunStatus(self._status_data(self.run_dir(run_id))["status"])
+
+    def list_pending_run_ids(self) -> list[str]:
+        """Run ids of pending chain steps, ordered by creation time."""
+        pending: list[tuple[str, str]] = []
+        for run_dir in self.runs_root.iterdir():
+            if not run_dir.is_dir() or (run_dir / "status.json").exists():
+                continue
+            try:
+                meta = self.read_json(run_dir / "meta.json")
+            except Exception:
+                continue
+            if meta.get("pending"):
+                pending.append((str(meta.get("created_at", "")), meta["run_id"]))
+        pending.sort(key=lambda item: item[0])
+        return [run_id for _, run_id in pending]
+
+    def set_pending_reason(self, run_id: str, reason: str | None) -> None:
+        path = self.run_dir(run_id) / "meta.json"
+        meta = self.read_json(path)
+        if meta.get("pending_reason") == reason:
+            return
+        meta["pending_reason"] = reason
+        self.write_json(path, meta)
+
+    def mark_launched(self, run_id: str) -> None:
+        path = self.run_dir(run_id) / "meta.json"
+        meta = self.read_json(path)
+        meta["pending"] = False
+        meta["pending_reason"] = None
+        meta["started_at"] = datetime.now(UTC).isoformat()
+        self.write_json(path, meta)
+
+    def dependents_of(self, run_id: str) -> list[str]:
+        dependents: list[str] = []
+        for run_dir in self.runs_root.iterdir():
+            if not run_dir.is_dir():
+                continue
+            try:
+                meta = self.read_json(run_dir / "meta.json")
+            except Exception:
+                continue
+            if run_id in meta.get("depends_on", []):
+                dependents.append(meta["run_id"])
+        return dependents
+
+    def cancel_chain(self, run_id: str, reason: str) -> None:
+        """Cancel a pending run and recursively cancel its pending dependents."""
+        self.require_run_dir(run_id)
+        if self.run_status(run_id) != RunStatus.pending:
+            return
+        path = self.run_dir(run_id) / "meta.json"
+        meta = self.read_json(path)
+        meta["pending"] = False
+        meta["pending_reason"] = None
+        self.write_json(path, meta)
+        self.write_status(run_id, RunStatus.cancelled, None, reason)
+        for dependent in self.dependents_of(run_id):
+            self.cancel_chain(dependent, f"Upstream {run_id} was cancelled.")
+
+    def resolve_artifact_refs(self, run_id: str) -> None:
+        """Resolve ArtifactRef markers in config.json to concrete paths.
+
+        Verifies each referenced artifact exists, writes ``resolved_path`` into
+        the stored config, and records ``consumes-artifact`` inputs so the run
+        appears in the lineage graph. Raises :class:`ArtifactResolutionError`
+        when a referenced artifact is missing.
+        """
+        run_dir = self.require_run_dir(run_id)
+        config = self.read_json(run_dir / "config.json")
+        records: list[dict[str, Any]] = []
+
+        def resolve(value: Any) -> Any:
+            if isinstance(value, dict):
+                inner = value.get("__artifact_ref__")
+                if isinstance(inner, dict) and "artifact" in inner and len(value) == 1:
+                    src = inner.get("run_id")
+                    artifact = inner.get("artifact")
+                    if not isinstance(src, str) or not src:
+                        raise ArtifactResolutionError(
+                            f"ArtifactRef in run {run_id} is missing a source run_id."
+                        )
+                    if not isinstance(artifact, str) or not artifact:
+                        raise ArtifactResolutionError(
+                            f"ArtifactRef in run {run_id} is missing an artifact name."
+                        )
+                    artifact_rel = Path(artifact)
+                    if artifact_rel.is_absolute() or ".." in artifact_rel.parts:
+                        raise ArtifactResolutionError(f"Unsafe artifact path: {artifact}")
+                    artifacts_root = (self.run_dir(src) / "artifacts").resolve()
+                    resolved_path = (artifacts_root / artifact_rel).resolve()
+                    if not is_relative_to(resolved_path, artifacts_root) or not resolved_path.exists():
+                        raise ArtifactResolutionError(
+                            f"Artifact '{artifact}' from run {src} was not found."
+                        )
+                    records.append(
+                        {
+                            "t": time.time(),
+                            "type": "consumes-artifact",
+                            "run_id": src,
+                            "artifact": artifact,
+                            "path": str(resolved_path),
+                        }
+                    )
+                    new_inner = dict(inner)
+                    new_inner["resolved_path"] = str(resolved_path)
+                    return {"__artifact_ref__": new_inner}
+                return {key: resolve(item) for key, item in value.items()}
+            if isinstance(value, list):
+                return [resolve(item) for item in value]
+            return value
+
+        resolved_config = resolve(config)
+        if records:
+            self.write_json(run_dir / "config.json", resolved_config)
+            with (run_dir / "inputs.jsonl").open("a", encoding="utf-8") as fp:
+                for record in records:
+                    fp.write(json.dumps(record, separators=(",", ":"), allow_nan=False) + "\n")
+                fp.flush()
 
     def list_runs(
         self,
@@ -187,6 +335,8 @@ class Store:
             error=status_data.get("error"),
             metric_names=self.metric_names(run_id),
             artifact_count=sum(1 for item in self.list_artifacts(run_id) if item["kind"] == "file"),
+            depends_on=list(meta.get("depends_on", [])),
+            pending_reason=meta.get("pending_reason"),
         )
 
     def read_annotations(self, run_id: str) -> Annotations:
@@ -880,6 +1030,8 @@ class Store:
         if status_path.exists():
             return self.read_json(status_path)
         meta = self.read_json(run_dir / "meta.json")
+        if meta.get("pending"):
+            return {"status": RunStatus.pending.value, "ended_at": None, "exit_code": None, "error": None}
         pid = meta.get("pid")
         create_time = meta.get("create_time")
         if pid and _pid_matches(int(pid), create_time):
@@ -890,6 +1042,44 @@ class Store:
         if pid is None:
             return {"status": RunStatus.unknown.value, "ended_at": None, "exit_code": None, "error": None}
         return {"status": RunStatus.unknown.value, "ended_at": None, "exit_code": None, "error": None}
+
+
+def rewrite_chain_step_refs(
+    config: dict[str, Any], run_ids: list[str], current_index: int
+) -> tuple[dict[str, Any], list[str]]:
+    """Rewrite ``ArtifactRef`` ``step`` markers to concrete ``run_id`` markers.
+
+    Returns the rewritten config and the sorted set of upstream run ids it
+    depends on. Raises :class:`ValueError` when a step index does not reference
+    an earlier step in the chain.
+    """
+    deps: set[str] = set()
+
+    def walk(value: Any) -> Any:
+        if isinstance(value, dict):
+            inner = value.get("__artifact_ref__")
+            if isinstance(inner, dict) and "artifact" in inner and len(value) == 1:
+                new_inner = dict(inner)
+                step = new_inner.get("step")
+                if step is not None:
+                    if not isinstance(step, int) or step < 0 or step >= current_index:
+                        raise ValueError(
+                            f"ArtifactRef step {step!r} must reference an earlier step "
+                            f"(0..{current_index - 1})."
+                        )
+                    new_inner.pop("step", None)
+                    new_inner["run_id"] = run_ids[step]
+                run_id = new_inner.get("run_id")
+                if isinstance(run_id, str) and run_id:
+                    deps.add(run_id)
+                return {"__artifact_ref__": new_inner}
+            return {key: walk(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [walk(item) for item in value]
+        return value
+
+    rewritten = walk(config)
+    return rewritten, sorted(deps)
 
 
 def _pid_matches(pid: int, create_time: float | None) -> bool:

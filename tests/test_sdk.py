@@ -172,6 +172,55 @@ def test_module_factory_creates_fresh_config_instances() -> None:
     assert second.forward(3) == 1
 
 
+def test_artifact_ref_unwraps_marker_and_round_trips() -> None:
+    class InferConfig(mikon.Config):
+        weights: mikon.ArtifactRef
+        batch: int = 8
+
+    config = InferConfig.model_validate(
+        {"weights": {"__artifact_ref__": {"step": 0, "artifact": "model.pt"}}}
+    )
+    assert config.weights.step == 0
+    assert config.weights.artifact == "model.pt"
+    assert config.weights.run_id is None
+    dumped = config.model_dump(mode="json")
+    assert dumped["weights"] == {"__artifact_ref__": {"artifact": "model.pt", "step": 0}}
+
+
+def test_artifact_ref_path_requires_resolution() -> None:
+    class InferConfig(mikon.Config):
+        weights: mikon.ArtifactRef
+
+    unresolved = InferConfig.model_validate(
+        {"weights": {"__artifact_ref__": {"run_id": "train__x", "artifact": "model.pt"}}}
+    )
+    with pytest.raises(RuntimeError):
+        _ = unresolved.weights.path
+
+    resolved = InferConfig.model_validate(
+        {
+            "weights": {
+                "__artifact_ref__": {
+                    "run_id": "train__x",
+                    "artifact": "model.pt",
+                    "resolved_path": "/tmp/model.pt",
+                }
+            }
+        }
+    )
+    assert str(resolved.weights.path) == "/tmp/model.pt"
+
+
+def test_artifact_ref_field_gets_picker_ui_hint() -> None:
+    from mikon.server.schema import derive_ui_schema
+
+    class InferConfig(mikon.Config):
+        weights: mikon.ArtifactRef
+
+    ui_schema = derive_ui_schema(InferConfig.model_json_schema())
+    assert ui_schema["weights"]["ui:widget"] == "artifact-ref"
+
+
 def test_dataset_register_and_context_inputs(tmp_path, monkeypatch) -> None:
     project = tmp_path / "project"
     project.mkdir()

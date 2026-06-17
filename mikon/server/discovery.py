@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib
 import importlib.util
+import inspect
 import json
 import os
 import subprocess
 import sys
+import textwrap
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from pydantic import ValidationError
 
@@ -180,8 +183,50 @@ def discover_in_process(project_root: Path, watch_paths: list[Path]) -> dict[str
             "schema_hash": schema_hash(json_schema),
             "json_schema": json_schema,
             "ui_schema": derive_ui_schema(json_schema),
+            "output_artifacts": extract_output_artifacts(definition.func),
         }
     return jobs
+
+
+def extract_output_artifacts(func: Callable[..., Any]) -> list[str]:
+    """Best-effort static scan of a job for the artifact filenames it produces.
+
+    Collects string literals from ``ctx.log_artifact("name", ...)`` calls and
+    ``ctx.artifacts_dir / "name"`` expressions in the job's source. Dynamic names
+    (f-strings, variables) cannot be resolved and are simply omitted; the UI
+    keeps a free-text fallback for those.
+    """
+    try:
+        source = textwrap.dedent(inspect.getsource(func))
+        tree = ast.parse(source)
+    except (OSError, TypeError, SyntaxError):
+        return []
+
+    names: set[str] = set()
+
+    def literal(node: ast.AST | None) -> str | None:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        return None
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr in {"log_artifact", "log_dir"}:
+                found = literal(node.args[0]) if node.args else None
+                if found is None:
+                    for keyword in node.keywords:
+                        if keyword.arg == "name":
+                            found = literal(keyword.value)
+                            break
+                if found:
+                    names.add(found)
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            if isinstance(node.left, ast.Attribute) and node.left.attr == "artifacts_dir":
+                found = literal(node.right)
+                if found:
+                    names.add(found)
+
+    return sorted(names)
 
 
 def discover_modules_in_process(project_root: Path, watch_paths: list[Path]) -> dict[str, Any]:

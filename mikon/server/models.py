@@ -13,6 +13,8 @@ class RunStatus(str, Enum):
     failed = "failed"
     stopped = "stopped"
     unknown = "unknown"
+    pending = "pending"
+    cancelled = "cancelled"
 
 
 class ProblemDetails(BaseModel):
@@ -29,6 +31,7 @@ class JobInfo(BaseModel):
     source_file: str
     lineno: int
     schema_hash: str
+    output_artifacts: list[str] = Field(default_factory=list)
 
 
 class JobDetail(JobInfo):
@@ -89,6 +92,8 @@ class RunDetail(RunSummary):
     error: str | None = None
     metric_names: list[str] = Field(default_factory=list)
     artifact_count: int = 0
+    depends_on: list[str] = Field(default_factory=list)
+    pending_reason: str | None = None
 
 
 class MetricRecord(BaseModel):
@@ -162,6 +167,23 @@ class CreateRunRequest(BaseModel):
 class CreateRunResponse(BaseModel):
     run_id: str
     status: RunStatus
+
+
+class ChainStep(BaseModel):
+    job: str
+    config: dict[str, Any]
+    gpus: list[str] = Field(min_length=1)
+    force: bool = False
+    annotations: Annotations | None = None
+
+
+class CreateChainRequest(BaseModel):
+    steps: list[ChainStep] = Field(min_length=1)
+    on_upstream_failure: Literal["cancel", "continue"] = "cancel"
+
+
+class CreateChainResponse(BaseModel):
+    run_ids: list[str]
 
 
 class FrameworkCheck(BaseModel):
