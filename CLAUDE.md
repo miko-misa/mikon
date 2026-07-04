@@ -97,6 +97,32 @@ uv run pytest          # 63 テスト（バックエンドのみ）
 
 ## リリース手順（v0.0.5 以降）
 
+### 自動リリース（推奨・v0.0.8 以降）
+
+`.github/workflows/publish.yml` が **`v*` タグの push をトリガー**に、フロントビルド →
+テスト → `uv build` → PyPI 公開まで自動実行する。手順は:
+
+```bash
+# 1. version を上げる（pyproject.toml）＋ uv lock
+# 2. コミット
+git commit -am "chore: bump version to 0.0.8"
+# 3. タグを打って push（タグ名 = v + pyproject の version、不一致だと CI が失敗する）
+git tag v0.0.8
+git push origin main
+git push origin v0.0.8   # ← これで CI が公開まで実行
+```
+
+**トークンについて**: PyPI Trusted Publishing (OIDC) を使うため、GitHub にトークンを保存
+する必要はない。初回のみ PyPI 側で設定する:
+<https://pypi.org/manage/project/mikon/settings/publishing/> →
+Owner `miko-misa` / Repository `mikon` / Workflow `publish.yml` / Environment は空欄。
+
+API トークン方式にする場合は、GitHub のリポジトリ Settings → Secrets and variables →
+Actions → New repository secret に `PYPI_API_TOKEN` を作成し、`publish.yml` の該当箇所を
+`password: ${{ secrets.PYPI_API_TOKEN }}` に切り替える（`id-token: write` は削除）。
+
+以下は **手動リリース**の手順（CI を使わない場合）。
+
 ### 1. フロントエンドをビルド
 
 **必須。忘れると PyPI に古い UI が含まれる。**

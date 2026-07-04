@@ -1,0 +1,55 @@
+name: Publish to PyPI
+
+# Triggered when a version tag (e.g. v0.0.8) is pushed. The tag must match the
+# version in pyproject.toml, or the run fails before publishing.
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required for PyPI Trusted Publishing (OIDC)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify tag matches package version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          ver="$(grep -m1 '^version' pyproject.toml | sed -E 's/.*"([^"]+)".*/\1/')"
+          echo "tag=$tag  pyproject=$ver"
+          if [ "$tag" != "$ver" ]; then
+            echo "::error::tag v$tag does not match pyproject version $ver"
+            exit 1
+          fi
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build # outputs to ../mikon/web, bundled into the wheel
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Run tests
+        run: uv run --frozen pytest -q
+
+      - name: Build sdist + wheel
+        run: uv build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # Uses Trusted Publishing (OIDC) — no token needed once the publisher is
+        # configured on PyPI (see repo docs / CLAUDE.md). To use an API token
+        # instead, remove `id-token: write` above and uncomment:
+        # with:
+        #   password: ${{ secrets.PYPI_API_TOKEN }}
