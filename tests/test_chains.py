@@ -15,9 +15,11 @@ from mikon.server.models import GpuInfo, GpuProcess, MachineInfo, ResourceSnapsh
 from mikon.server.registry import Registry
 from mikon.server.runner import Runner
 from mikon.server.settings import load_settings
+from mikon.server.models import LineageEdge
 from mikon.server.store import (
     ArtifactResolutionError,
     Store,
+    _lineage_node_ids,
     rewrite_chain_step_refs,
 )
 
@@ -572,3 +574,132 @@ def test_jobs_api_exposes_output_artifacts(tmp_path: Path) -> None:
     assert detail["output_artifacts"] == ["model.pt"]
     train_entry = next(job for job in listed if job["name"] == "train")
     assert train_entry["output_artifacts"] == ["model.pt"]
+
+
+# --------------------------------------------------------------------------- #
+# lineage traversal — "both" must not leak siblings
+# --------------------------------------------------------------------------- #
+
+
+def _diamond_edges() -> list[LineageEdge]:
+    # A -> C, B -> C, C -> D, C -> E  (src = upstream/producer, dst = downstream)
+    return [
+        LineageEdge(src="A", dst="C", type="consumes-artifact"),
+        LineageEdge(src="B", dst="C", type="consumes-artifact"),
+        LineageEdge(src="C", dst="D", type="consumes-artifact"),
+        LineageEdge(src="C", dst="E", type="consumes-artifact"),
+    ]
+
+
+def test_lineage_both_excludes_siblings() -> None:
+    # Centered on the leaf E, "both" must not pull in its sibling D via shared parent C.
+    got = _lineage_node_ids("E", _diamond_edges(), direction="both", depth=3)
+    assert got == {"A", "B", "C", "E"}
+    assert "D" not in got
+
+
+def test_lineage_both_from_middle_shows_ancestors_and_descendants() -> None:
+    # Centered on C, "both" is the union of ancestors {A,B} and descendants {D,E}.
+    got = _lineage_node_ids("C", _diamond_edges(), direction="both", depth=3)
+    assert got == {"A", "B", "C", "D", "E"}
+
+
+def test_lineage_ancestors_only() -> None:
+    got = _lineage_node_ids("E", _diamond_edges(), direction="ancestors", depth=3)
+    assert got == {"A", "B", "C", "E"}
+
+
+def test_lineage_descendants_only() -> None:
+    # E is a leaf — it produced nothing downstream.
+    got = _lineage_node_ids("E", _diamond_edges(), direction="descendants", depth=3)
+    assert got == {"E"}
+
+
+# --------------------------------------------------------------------------- #
+# lineage traversal — complex DAG
+#
+# Edges are producer(src) -> consumer(dst), i.e. src is the ancestor of dst.
+#
+#            A            B
+#           / \          / \
+#          v   v        v   v
+#          C   H        C   D        (A->C, A->H, B->C, B->D)
+#          |    \      /   /
+#          |     v    v   v
+#          |      D<--'   (H->D)     D has parents B and H
+#          |      |
+#          v      v
+#     C-->{E, F}  D-->E              (C->E, C->F, D->E)
+#          \  |  /
+#           v v v
+#            E   F
+#            \   /
+#             v v
+#              G                     (E->G, F->G)
+#
+# Full edge list:
+#   A->C, A->H, B->C, B->D, H->D, C->E, C->F, D->E, E->G, F->G
+#
+# The subtle node is F relative to E: F shares a PARENT with E (both children of C)
+# AND shares a CHILD with E (both feed G). Yet F is neither an ancestor nor a
+# descendant of E, so a correct "both" traversal from E must exclude it.
+# --------------------------------------------------------------------------- #
+
+
+def _complex_edges() -> list[LineageEdge]:
+    pairs = [
+        ("A", "C"), ("A", "H"),
+        ("B", "C"), ("B", "D"),
+        ("H", "D"),
+        ("C", "E"), ("C", "F"),
+        ("D", "E"),
+        ("E", "G"), ("F", "G"),
+    ]
+    return [LineageEdge(src=s, dst=d, type="consumes-artifact") for s, d in pairs]
+
+
+def test_complex_e_ancestors() -> None:
+    got = _lineage_node_ids("E", _complex_edges(), direction="ancestors", depth=5)
+    assert got == {"A", "B", "C", "D", "E", "H"}
+
+
+def test_complex_e_ancestors_depth_1() -> None:
+    got = _lineage_node_ids("E", _complex_edges(), direction="ancestors", depth=1)
+    assert got == {"C", "D", "E"}
+
+
+def test_complex_e_descendants() -> None:
+    got = _lineage_node_ids("E", _complex_edges(), direction="descendants", depth=5)
+    assert got == {"E", "G"}
+
+
+def test_complex_e_both_excludes_F() -> None:
+    # F shares parent C and child G with E, but is neither ancestor nor descendant.
+    got = _lineage_node_ids("E", _complex_edges(), direction="both", depth=5)
+    assert got == {"A", "B", "C", "D", "E", "G", "H"}
+    assert "F" not in got
+
+
+def test_complex_c_both_excludes_D_and_H() -> None:
+    got = _lineage_node_ids("C", _complex_edges(), direction="both", depth=5)
+    assert got == {"A", "B", "C", "E", "F", "G"}
+
+
+def test_complex_d_both_excludes_C_and_F() -> None:
+    got = _lineage_node_ids("D", _complex_edges(), direction="both", depth=5)
+    assert got == {"A", "B", "D", "E", "G", "H"}
+
+
+def test_complex_g_ancestors_full() -> None:
+    got = _lineage_node_ids("G", _complex_edges(), direction="ancestors", depth=5)
+    assert got == {"A", "B", "C", "D", "E", "F", "G", "H"}
+
+
+def test_complex_g_ancestors_depth_2() -> None:
+    got = _lineage_node_ids("G", _complex_edges(), direction="ancestors", depth=2)
+    assert got == {"C", "D", "E", "F", "G"}
+
+
+def test_complex_a_descendants_excludes_B() -> None:
+    got = _lineage_node_ids("A", _complex_edges(), direction="descendants", depth=5)
+    assert got == {"A", "C", "D", "E", "F", "G", "H"}

@@ -1153,21 +1153,29 @@ def _lineage_node_ids(
     for edge in edges:
         outgoing.setdefault(edge.src, set()).add(edge.dst)
         incoming.setdefault(edge.dst, set()).add(edge.src)
-    visited = {center}
-    frontier = {center}
-    for _ in range(max(depth, 0)):
-        next_frontier: set[str] = set()
-        for node_id in frontier:
-            if direction in {"ancestors", "both"}:
-                next_frontier.update(incoming.get(node_id, set()))
-            if direction in {"descendants", "both"}:
-                next_frontier.update(outgoing.get(node_id, set()))
-        next_frontier -= visited
-        if not next_frontier:
-            break
-        visited.update(next_frontier)
-        frontier = next_frontier
-    return visited
+
+    def _walk(adjacency: dict[str, set[str]]) -> set[str]:
+        visited = {center}
+        frontier = {center}
+        for _ in range(max(depth, 0)):
+            next_frontier: set[str] = set()
+            for node_id in frontier:
+                next_frontier.update(adjacency.get(node_id, set()))
+            next_frontier -= visited
+            if not next_frontier:
+                break
+            visited.update(next_frontier)
+            frontier = next_frontier
+        return visited
+
+    # "both" is the union of an ancestors-only and a descendants-only walk — never a
+    # per-hop bidirectional flood-fill, which would pull siblings in via a shared parent.
+    result = {center}
+    if direction in {"ancestors", "both"}:
+        result |= _walk(incoming)
+    if direction in {"descendants", "both"}:
+        result |= _walk(outgoing)
+    return result
 
 
 def _safe_name(name: str) -> str:
