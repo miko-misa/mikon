@@ -10,7 +10,9 @@ import ReactFlow, {
   type Node as RFNode,
 } from "reactflow";
 import "reactflow/dist/style.css";
-import dagre from "@dagrejs/dagre";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore -- elkjs' bundled build ships no type declarations; typed locally below.
+import ELK from "elkjs/lib/elk.bundled.js";
 import {
   Box,
   Code2,
@@ -96,6 +98,8 @@ type LineageCanvasNodeData = {
   node: LineageNodeModel;
   isCurrent: boolean;
   isSelected: boolean;
+  sourcePorts: PortPos[];
+  targetPorts: PortPos[];
 };
 
 type NodeConfigState = {
@@ -105,29 +109,131 @@ type NodeConfigState = {
   error: string | null;
 };
 
-function layoutGraph(nodes: RFNode[], edges: RFEdge[]) {
-  const graph = new dagre.graphlib.Graph();
-  graph.setDefaultEdgeLabel(() => ({}));
-  graph.setGraph({
-    rankdir: "LR",
-    nodesep: 52,
-    ranksep: 120,
-    marginx: 32,
-    marginy: 32,
-  });
-  nodes.forEach((node) => graph.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT }));
-  edges.forEach((edge) => graph.setEdge(edge.source, edge.target));
-  dagre.layout(graph);
-  return nodes.map((node) => {
-    const position = graph.node(node.id);
-    return {
-      ...node,
-      position: {
-        x: position.x - NODE_WIDTH / 2,
-        y: position.y - NODE_HEIGHT / 2,
-      },
-    };
-  });
+// --------------------------------------------------------------------------- //
+// ELK layered layout with per-edge ports.
+//
+// dagre placed nodes but funneled every edge into a single centered handle,
+// which made parallel/converging edges overlap. ELK's `layered` algorithm
+// distributes one port per edge along each node side (FIXED_SIDE lets it order
+// the ports to minimise crossings) and routes edges orthogonally, so incoming /
+// outgoing edges no longer collapse onto one point.
+// --------------------------------------------------------------------------- //
+
+const PORT_SIZE = 7;
+
+const ELK_LAYOUT_OPTIONS: Record<string, string> = {
+  "elk.algorithm": "layered",
+  "elk.direction": "RIGHT",
+  "elk.edgeRouting": "ORTHOGONAL",
+  "elk.layered.spacing.nodeNodeBetweenLayers": "120",
+  "elk.spacing.nodeNode": "52",
+  "elk.spacing.portPort": "14",
+  "elk.spacing.edgeEdge": "12",
+  "elk.spacing.edgeNode": "24",
+  "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
+  "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
+};
+
+// Minimal, self-contained typing of the ELK surface we use (elkjs bundled build
+// ships no declarations).
+type ElkPortInput = {
+  id: string;
+  width: number;
+  height: number;
+  layoutOptions: Record<string, string>;
+};
+type ElkNodeInput = {
+  id: string;
+  width: number;
+  height: number;
+  layoutOptions: Record<string, string>;
+  ports: ElkPortInput[];
+};
+type ElkGraphInput = {
+  id: string;
+  layoutOptions: Record<string, string>;
+  children: ElkNodeInput[];
+  edges: { id: string; sources: string[]; targets: string[] }[];
+};
+type ElkPortOutput = { id?: string; x?: number; y?: number; height?: number };
+type ElkNodeOutput = {
+  id?: string;
+  x?: number;
+  y?: number;
+  ports?: ElkPortOutput[];
+  children?: ElkNodeOutput[];
+};
+
+const elk: { layout(graph: ElkGraphInput): Promise<ElkNodeOutput> } = new ELK();
+
+type PortPos = { id: string; top: number };
+type LayoutResult = {
+  positions: Record<string, { x: number; y: number }>;
+  sourcePorts: Record<string, PortPos[]>;
+  targetPorts: Record<string, PortPos[]>;
+};
+
+type LayoutEdge = { id: string; source: string; target: string };
+
+async function elkLayout(nodeIds: string[], edges: LayoutEdge[]): Promise<LayoutResult> {
+  const outByNode = new Map<string, LayoutEdge[]>();
+  const inByNode = new Map<string, LayoutEdge[]>();
+  for (const edge of edges) {
+    (outByNode.get(edge.source) ?? outByNode.set(edge.source, []).get(edge.source)!).push(edge);
+    (inByNode.get(edge.target) ?? inByNode.set(edge.target, []).get(edge.target)!).push(edge);
+  }
+
+  const children: ElkNodeInput[] = nodeIds.map((id) => ({
+    id,
+    width: NODE_WIDTH,
+    height: NODE_HEIGHT,
+    layoutOptions: { "elk.portConstraints": "FIXED_SIDE" },
+    ports: [
+      ...(outByNode.get(id) ?? []).map((edge) => ({
+        id: `s:${edge.id}`,
+        width: PORT_SIZE,
+        height: PORT_SIZE,
+        layoutOptions: { "elk.port.side": "EAST" },
+      })),
+      ...(inByNode.get(id) ?? []).map((edge) => ({
+        id: `t:${edge.id}`,
+        width: PORT_SIZE,
+        height: PORT_SIZE,
+        layoutOptions: { "elk.port.side": "WEST" },
+      })),
+    ],
+  }));
+
+  const graph: ElkGraphInput = {
+    id: "root",
+    layoutOptions: ELK_LAYOUT_OPTIONS,
+    children,
+    edges: edges.map((edge) => ({
+      id: edge.id,
+      sources: [`s:${edge.id}`],
+      targets: [`t:${edge.id}`],
+    })),
+  };
+
+  const result = await elk.layout(graph);
+  const positions: LayoutResult["positions"] = {};
+  const sourcePorts: LayoutResult["sourcePorts"] = {};
+  const targetPorts: LayoutResult["targetPorts"] = {};
+  for (const child of result.children ?? []) {
+    if (!child.id) continue;
+    positions[child.id] = { x: child.x ?? 0, y: child.y ?? 0 };
+    const source: PortPos[] = [];
+    const target: PortPos[] = [];
+    for (const port of child.ports ?? []) {
+      if (!port.id) continue;
+      const top = (port.y ?? 0) + (port.height ?? PORT_SIZE) / 2;
+      if (port.id.startsWith("s:")) source.push({ id: port.id, top });
+      else target.push({ id: port.id, top });
+    }
+    sourcePorts[child.id] = source;
+    targetPorts[child.id] = target;
+  }
+  return { positions, sourcePorts, targetPorts };
 }
 
 function LineageCanvasNode({ data }: { data: LineageCanvasNodeData }) {
@@ -146,11 +252,16 @@ function LineageCanvasNode({ data }: { data: LineageCanvasNodeData }) {
           : data.isCurrent && "ring-2 ring-white/70 ring-offset-2 ring-offset-zinc-950"
       )}
     >
-      <Handle
-        type="target"
-        position={Position.Left}
-        className="!h-3 !w-3 !border !border-zinc-950 !bg-zinc-200"
-      />
+      {data.targetPorts.map((port) => (
+        <Handle
+          key={port.id}
+          id={port.id}
+          type="target"
+          position={Position.Left}
+          style={{ top: port.top }}
+          className="!h-2.5 !w-2.5 !border !border-zinc-950 !bg-zinc-200"
+        />
+      ))}
       <div className="flex h-8 items-center gap-2 border-b border-white/10 px-3">
         <Icon className={cn("h-4 w-4", meta.text)} />
         <span className={cn("text-xs font-semibold uppercase tracking-wide", meta.text)}>
@@ -166,11 +277,16 @@ function LineageCanvasNode({ data }: { data: LineageCanvasNodeData }) {
         <div className="truncate text-sm font-medium text-zinc-50">{details.title}</div>
         <div className="mt-1 truncate font-mono text-[11px] text-zinc-400">{details.subtitle}</div>
       </div>
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="!h-3 !w-3 !border !border-zinc-950 !bg-zinc-200"
-      />
+      {data.sourcePorts.map((port) => (
+        <Handle
+          key={port.id}
+          id={port.id}
+          type="source"
+          position={Position.Right}
+          style={{ top: port.top }}
+          className="!h-2.5 !w-2.5 !border !border-zinc-950 !bg-zinc-200"
+        />
+      ))}
     </div>
   );
 }
@@ -206,42 +322,99 @@ function LineageGraphSurface({
   onEdgeClick?: (edge: LineageEdgeModel, edgeId: string) => void;
   onPaneClick?: () => void;
 }) {
-  const graph = useMemo(() => {
-    if (!lineage) return { nodes: [] as RFNode[], edges: [] as RFEdge[] };
+  // Visible nodes + edges, derived synchronously. `base` is the identity the ELK
+  // effect keys off; it only changes when the lineage itself changes (not on
+  // selection), so clicking a node/edge never triggers a re-layout.
+  const base = useMemo(() => {
+    if (!lineage || lineage.nodes.length === 0) return null;
     const visibleIds = new Set(lineage.nodes.map((node) => node.id));
-    const nodes: RFNode[] = lineage.nodes.map((node) => ({
-      id: node.id,
-      type: "lineageCanvasNode",
-      position: { x: 0, y: 0 },
-      data: {
-        node,
-        isCurrent: node.id === lineage.center,
-        isSelected: node.id === selectedNodeId,
-      } satisfies LineageCanvasNodeData,
-    }));
-    const edges: RFEdge[] = lineage.edges
+    const edges = lineage.edges
       .filter((edge) => visibleIds.has(edge.src) && visibleIds.has(edge.dst))
-      .map((edge, index) => {
-        const meta = EDGE_META[edge.type] ?? EDGE_META.manual;
-        const id = edgeKey(edge, index);
-        return {
-          id,
-          source: edge.src,
-          target: edge.dst,
-          type: "smoothstep",
-          label: "",
-          markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: meta.color },
-          style: {
-            stroke: meta.color,
-            strokeWidth: selectedEdgeId === id ? 3 : 2,
-            strokeDasharray: meta.dashed ? "6 4" : undefined,
-          },
-          animated: meta.animated,
-          data: edge,
-        };
+      .map((edge, index) => ({
+        id: edgeKey(edge, index),
+        source: edge.src,
+        target: edge.dst,
+        model: edge,
+      }));
+    return { nodes: lineage.nodes, edges };
+  }, [lineage]);
+
+  // Tagged with the `base` it was computed from, so a pending re-layout never
+  // pairs a new base with stale positions (their edge/node ids differ).
+  const [layout, setLayout] = useState<{ key: unknown; result: LayoutResult } | null>(null);
+  const [layoutError, setLayoutError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!base) {
+      setLayout(null);
+      setLayoutError(null);
+      return;
+    }
+    let cancelled = false;
+    setLayoutError(null);
+    void elkLayout(
+      base.nodes.map((node) => node.id),
+      base.edges
+    )
+      .then((result) => {
+        if (!cancelled) setLayout({ key: base, result });
+      })
+      .catch((exc) => {
+        if (!cancelled) {
+          setLayout(null);
+          setLayoutError(String(exc));
+        }
       });
-    return { nodes: layoutGraph(nodes, edges), edges };
-  }, [lineage, selectedEdgeId, selectedNodeId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [base]);
+
+  const activeLayout = layout && layout.key === base ? layout.result : null;
+
+  // Apply positions/ports + selection styling. Re-runs on selection without
+  // re-running ELK.
+  const graph = useMemo(() => {
+    if (!lineage || !base || !activeLayout) return { nodes: [] as RFNode[], edges: [] as RFEdge[] };
+    const nodes: RFNode[] = base.nodes
+      .filter((node) => activeLayout.positions[node.id])
+      .map((node) => ({
+        id: node.id,
+        type: "lineageCanvasNode",
+        position: activeLayout.positions[node.id],
+        data: {
+          node,
+          isCurrent: node.id === lineage.center,
+          isSelected: node.id === selectedNodeId,
+          sourcePorts: activeLayout.sourcePorts[node.id] ?? [],
+          targetPorts: activeLayout.targetPorts[node.id] ?? [],
+        } satisfies LineageCanvasNodeData,
+      }));
+    const edges: RFEdge[] = base.edges.map((edge) => {
+      const meta = EDGE_META[edge.model.type] ?? EDGE_META.manual;
+      return {
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        sourceHandle: `s:${edge.id}`,
+        targetHandle: `t:${edge.id}`,
+        type: "smoothstep",
+        label: "",
+        markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: meta.color },
+        style: {
+          stroke: meta.color,
+          strokeWidth: selectedEdgeId === edge.id ? 3 : 2,
+          strokeDasharray: meta.dashed ? "6 4" : undefined,
+        },
+        animated: meta.animated,
+        data: edge.model,
+      };
+    });
+    return { nodes, edges };
+  }, [lineage, base, activeLayout, selectedEdgeId, selectedNodeId]);
+
+  const isEmpty = !lineage || lineage.nodes.length === 0;
+  const layoutPending = !isEmpty && graph.nodes.length === 0 && !layoutError;
 
   return (
     <div
@@ -250,13 +423,15 @@ function LineageGraphSurface({
         heightClassName
       )}
     >
-      {loading && !lineage ? (
+      {(loading && !lineage) || layoutPending ? (
         <div className="p-4">
           <Skeleton className={cn("w-full bg-zinc-800", skeletonClassName)} />
         </div>
       ) : error ? (
         <GraphState icon={<GitBranch className="h-8 w-8" />} title="Lineage failed to load" text={error} />
-      ) : graph.nodes.length === 0 ? (
+      ) : layoutError ? (
+        <GraphState icon={<GitBranch className="h-8 w-8" />} title="Layout failed" text={layoutError} />
+      ) : isEmpty ? (
         <GraphState
           icon={<Box className="h-8 w-8" />}
           title={emptyTitle}
