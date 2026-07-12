@@ -713,6 +713,7 @@ Compare config values and metrics across multiple runs side by side:
 
 ```
 GET /api/compare/runs?run_id=<id1>&run_id=<id2>[&run_id=<id3>...]
+POST /api/runs/compare              # body: {"run_ids": ["<id1>", "<id2>", ...]} (used by the web UI)
 ```
 
 At least 2 `run_id` query parameters are required.

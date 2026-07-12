@@ -99,6 +99,7 @@ root = "docs"              # document root shown in dashboard Docs tab
 | GET | `/configs` | List saved configs |
 | PUT | `/configs/{name}` | Save a config |
 | GET | `/compare/runs` | Compare multiple runs |
+| POST | `/runs/compare` | Compare multiple runs (body: `{"run_ids": [...]}`; used by the web UI) |
 
 ---
 

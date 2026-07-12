@@ -17,6 +17,7 @@ from mikon.server.docs import ASSET_EXTENSIONS, DOC_EXTENSIONS, DocsService
 from mikon.server.models import (
     AnnotationsPatch,
     BuildDatasetRequest,
+    CompareRunsRequest,
     ConfigDiffRequest,
     ConfigSaveRequest,
     CreateChainRequest,
@@ -338,6 +339,10 @@ def create_api_router() -> APIRouter:
     @router.get("/compare/runs")
     def compare_runs(request: Request, run_id: Annotated[list[str], Query(min_length=2)]):
         return request.app.state.store.compare_runs(run_id)
+
+    @router.post("/runs/compare")
+    def compare_runs_post(body: CompareRunsRequest, request: Request):
+        return request.app.state.store.compare_runs(body.run_ids)
 
     @router.get("/runs/{run_id}/lineage")
     def get_lineage(

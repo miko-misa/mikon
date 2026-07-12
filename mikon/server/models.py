@@ -320,6 +320,10 @@ class ConfigDiff(BaseModel):
     migrated_values: dict[str, Any] = Field(default_factory=dict)
 
 
+class CompareRunsRequest(BaseModel):
+    run_ids: list[str] = Field(min_length=2)
+
+
 class CompareMetricStats(BaseModel):
     count: int
     latest: float | None = None

@@ -713,6 +713,7 @@ Body（任意）: { "job": "<別のジョブ名>" }
 
 ```
 GET /api/compare/runs?run_id=<id1>&run_id=<id2>[&run_id=<id3>...]
+POST /api/runs/compare              # ボディ: {"run_ids": ["<id1>", "<id2>", ...]}(Web UI が使用)
 ```
 
 `run_id` は最低2件必要です。

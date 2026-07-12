@@ -1809,6 +1809,50 @@ def test_artifact_listing_includes_directories_and_compare_summarizes_metrics(tm
     assert compare.runs[0].metrics["loss"].min == 1.0
 
 
+def test_compare_runs_post_matches_get_and_requires_two_run_ids(tmp_path: Path) -> None:
+    project = make_project(tmp_path)
+    app = create_app(project_root=project)
+    store = app.state.store
+    run1 = store.create_run(
+        run_id="run1",
+        job="train",
+        config={"epochs": 1},
+        gpus=["nvidia:0"],
+        schema_hash="schema",
+        command=[],
+        project_root=project,
+        watch=[],
+    )
+    run2 = store.create_run(
+        run_id="run2",
+        job="train",
+        config={"epochs": 2},
+        gpus=["nvidia:0"],
+        schema_hash="schema",
+        command=[],
+        project_root=project,
+        watch=[],
+    )
+    (run1 / "metrics.jsonl").write_text(
+        '{"t": 1760000000, "step": 0, "name": "loss", "value": 3.0}\n',
+        encoding="utf-8",
+    )
+    (run2 / "metrics.jsonl").write_text(
+        '{"t": 1760000000, "step": 0, "name": "loss", "value": 2.0}\n',
+        encoding="utf-8",
+    )
+
+    with TestClient(app) as client:
+        get_response = client.get("/api/compare/runs", params=[("run_id", "run1"), ("run_id", "run2")])
+        post_response = client.post("/api/runs/compare", json={"run_ids": ["run1", "run2"]})
+        too_few = client.post("/api/runs/compare", json={"run_ids": ["run1"]})
+
+    assert get_response.status_code == 200, get_response.text
+    assert post_response.status_code == 200, post_response.text
+    assert post_response.json() == get_response.json()
+    assert too_few.status_code == 422
+
+
 def test_teelinewriter_close_path_does_not_raise_and_keeps_target_open(tmp_path: Path) -> None:
     from mikon._runner import _LogEventWriter, _TeeLineWriter
 
